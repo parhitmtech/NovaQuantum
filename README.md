@@ -184,6 +184,8 @@ Write in the browser, run in a sandbox, train on ASU's SOL A100s with `sol.finet
 | **Language** | Indentation-based syntax; static types (`int`, `float`, `double`, `bool`, `string`, `Tensor`); functions with several return values; generic functions and classes; structs, classes and inheritance; `vector<T>` and `map<K, V>`; modules via `orbit` |
 | **Tensors and ML** | 1–6-dimensional tensors with `+ - * / @`, indexing and slicing, activations, losses, reverse-mode autograd, and `novatorch.nn` / `optim` / `data` in the standard library |
 | **Compiler** | C++17; a lexer, a flat parse tree, a check pass for names and types, and lowering to an IR; optional optimizations (constant folding, copy propagation, dead-code elimination, loop-invariant code motion, inlining); a compiler pass that frees each tensor after its last use; an interpreter, and CUDA source output |
+| **MLIR back end** | The `nova` dialect (TableGen ODS, per-value memory effects), SSA lowering from the checked tree (`scf`, `func`, `arith`), dialect conversion through `llvm` to native executables (`nova-compile`), a C runtime, and differential testing against the interpreter: [docs/DESIGN.md](docs/DESIGN.md), step C |
+| **Quantum** | The `qnova` dialect: qubits as SSA values, decomposition into neutral-atom native gates, canonicalization, routing by moving atoms, layer scheduling, and a statevector simulator: [docs/QUANTUM.md](docs/QUANTUM.md) |
 | **GPU kernels** | Matmul and batched matmul in CUDA, by hand in four steps up to `cp.async` double buffering (82% of cuBLAS on an A100), and the same in Triton (95% of cuBLAS in FP32, up to 100% with tensor cores), with Triton's IR traced stage by stage: [compiler/kernels](compiler/kernels/) |
 | **IDE** | React + Monaco editor, file workspace, terminal, REPL, step debugger, sharing, and NovaBot (Claude via AWS Bedrock), which can read, write and run code |
 | **Execution** | Each run gets its own network-less, read-only container with CPU, memory, time and process limits |
@@ -341,7 +343,12 @@ where it fits and which ideas from these projects it should borrow.
 
 ## 📊 Performance
 
-### CPU
+> **Native code:** compiled through MLIR and LLVM, the same programs run 2–215× faster than the interpreter below
+> and on par with C. Measured on the machine in the [table at the top](#-nova-to-native-code-through-mlir-and-llvm),
+> with the method in [BENCHMARKS.md](docs/BENCHMARKS.md#native-code-through-mlir-and-llvm). The charts below are
+> the interpreter.
+
+### CPU (interpreter)
 
 <img src="docs/assets/cpu-benchmarks.svg" alt="CPU benchmarks, wall-clock ms: calls (naive fib(30)): Nova 1,004, CPython 134, Node 56, C 17. int_loop: Nova 134 (wrong answer from 32-bit overflow), CPython 486, Node 54, C 17. vector_sum: Nova 93, CPython 192, Node 64, C 17." width="100%">
 
@@ -396,11 +403,11 @@ The kernels, what limits each step, and how to run them on SOL are in
 flowchart TB
     subgraph done["✅ Done"]
         direction LR
-        d1["Syntax redesign,<br/>objects as references"] --> d2["Production front end<br/>lexer · tree · check · lowering"] --> d3["Batched matmul<br/>with broadcasting"] --> A["A · GPU kernels<br/>CUDA by hand, then Triton"] --> B["B · Design record"]
+        d1["Syntax redesign,<br/>objects as references"] --> d2["Production front end<br/>lexer · tree · check · lowering"] --> d3["Batched matmul<br/>with broadcasting"] --> A["A · GPU kernels<br/>CUDA by hand, then Triton"] --> B["B · Design record"] --> C["C · MLIR dialect in SSA<br/>→ native code via LLVM<br/>· differential testing"] --> Q["Q · Quantum: qnova<br/>→ neutral-atom hardware"]
     end
     subgraph now["🚧 Now"]
         direction LR
-        C["C · Nova IR as an MLIR dialect, in SSA<br/>→ LLVM for native code · → linalg for GPU code"]
+        N["Classes, strings, containers<br/>and autograd natively<br/>· tensor checks as ops"]
     end
     subgraph next["Next"]
         direction LR
@@ -411,8 +418,8 @@ flowchart TB
     classDef done fill:#12261f,stroke:#76dac4,color:#e6eaf2
     classDef now fill:#1b2033,stroke:#a5a2ff,color:#e6eaf2
     classDef next fill:#111725,stroke:#34415e,color:#99a6be
-    class d1,d2,d3,A,B done
-    class C now
+    class d1,d2,d3,A,B,C,Q done
+    class N now
     class D,E,F next
     style done fill:#0c101b,stroke:#242e43,color:#76dac4
     style now fill:#0c101b,stroke:#242e43,color:#a5a2ff
@@ -421,23 +428,32 @@ flowchart TB
 
 **Done:** the syntax redesign and objects as references, with reference counting; a production front end (a
 new lexer, a flat parse tree, a separate check pass, and lowering to the IR); batched matmul with NumPy-style
-broadcasting, forward and backward; GPU matmul kernels in CUDA and Triton, measured on A100s; and a
-[design record](docs/DESIGN.md) of the decisions so far.
+broadcasting, forward and backward; GPU matmul kernels in CUDA and Triton, measured on A100s; a
+[design record](docs/DESIGN.md) of the decisions. Also done:
+- **C:** Nova as an MLIR dialect in SSA form, compiled through LLVM to native code and checked against the
+  interpreter by differential testing in CI;
+- **Q:** the `qnova` dialect, which compiles quantum circuits for a neutral-atom machine and checks them on a
+  simulator.
 
-**Now:** Nova IR as an MLIR dialect in SSA form. Its first slice is in `compiler/mlir/`: `!nova.tensor`,
-`nova.zeros`, `nova.matmul` and `nova.print`, a `nova-opt` driver, and lit/FileCheck tests. `nova-lower` already
-lowers checked Nova programs into it: control flow as `scf`, functions and calls as `func`, and tensors as nova
-ops. From there it lowers to native code through LLVM and to GPU code through `linalg`.
+**Now:** widening the native path to classes, strings, containers and autograd (28 test and benchmark programs
+compile natively today, [BENCHMARKS.md](docs/BENCHMARKS.md#differential-testing)), and splitting the tensor ops'
+runtime checks into ops a pass can prove away.
 
-**Next:** a tile-level kernel language lowered to Triton, then a Triton backend for a simulated AI accelerator.
+**Next:**
+- a tile-level kernel language lowered to Triton;
+- a Triton backend for a simulated AI accelerator;
+- for `qnova`: Nova syntax for circuits and a richer machine model.
+
 The full plan is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 <details>
 <summary><b>Known gaps today</b></summary>
 
-- `int` is 32-bit and overflows silently ([BENCHMARKS.md](docs/BENCHMARKS.md#issues-found), issue 2).
-- Some of [docs/SYNTAX.md](docs/SYNTAX.md) is still the *target* design. Not yet implemented: `10_000`
-  literals, `t.grad`, `\n` / `\t` escapes, and `print(t)` for tensors. Use `tensor_print(t)` for now.
+- `int` is 32-bit and overflows silently ([BENCHMARKS.md](docs/BENCHMARKS.md#issues-found), issue 2). The native
+  path wraps exactly as the interpreter does.
+- Some of [docs/SYNTAX.md](docs/SYNTAX.md) is still the *target* design. Not yet implemented: `10_000` literals,
+  `t.grad`, and `\n` / `\t` escapes.
+- Natively compiled programs don't free their tensors yet, and `nova-compile` doesn't resolve `orbit` imports yet.
 
 </details>
 
