@@ -156,8 +156,106 @@ support yet:
 |---|---|
 | `10_000` digit separators | Parse error (`expected the end of the statement, got '_000'`) |
 | `layer1.W.grad` | `a Tensor has no member 'grad'`; use `tensor_grad(t)` |
-| `print(pred)` for a tensor | Prints the handle number; use `tensor_print(t)` |
+| `print(pred)` for a tensor | Fixed: prints the elements, as `tensor_print(t)` does (found by differential testing, below) |
 | `"\n"`, `"\t"` escapes | Printed literally (`compiler/tests/grad_stress_loop.expected` currently expects `\n`) |
 
 Either implement these or mark them "planned" in SYNTAX.md, so readers who copy the first example get a
 program that runs.
+
+## Native code through MLIR and LLVM
+
+`nova-compile` compiles a Nova program through the MLIR back end and LLVM to a native executable (`clang -O2`,
+linked with Nova's C runtime). [`compiler/mlir/utils/benchmark.py`](../compiler/mlir/utils/benchmark.py) times
+each program interpreted and native: the median of 7 runs, process start included. It also times the same
+algorithm in C, compiled by the same clang, and it refuses to time a program whose two outputs differ.
+
+```bash
+python3 compiler/mlir/utils/benchmark.py --build build/mlir --interpreter compiler/build/nova \
+        compiler/benchmarks/compare/calls.nova compiler/benchmarks/compare/int_loop.nova compiler/benchmarks/fibonacci.nova
+```
+
+Intel Core Ultra 7 155H, WSL2 Ubuntu 24.04, LLVM 20:
+
+| Program | Interpreter | Nova native | Speedup | Same in C, clang -O2 |
+|---|---|---|---|---|
+| `calls` (naive fib(30), 1.3M calls) | 633 ms | 2.9 ms | 215× | 2.5 ms |
+| `int_loop` (3M iterations) | 159 ms | 1.0 ms | 157× | 2.1 ms |
+| `fibonacci` (fib(35)) | 53 ms | 26 ms | 2.1× | 34 ms |
+
+- **Native code is on par with C.** The rest of the gap is the C runtime calls and Nova's checked integer division.
+  For a constant divisor, canonicalize removes the check: `int_loop` went from 3.7 ms to 1.0 ms once
+  `nova-compile` ran canonicalize before lowering.
+- **`int_loop` is not the same computation in both languages.** The C version uses 64-bit integers to get the right
+  sum; Nova's `int` is 32 bits and wraps (issue 2). Native and interpreted Nova wrap identically.
+- **fib(35) is only 2.1× faster** because the interpreter memoizes pure functions automatically (issue 3). It skips
+  most of the 30M calls that native code makes, and native code still finishes faster than C.
+
+### Differential testing
+
+[`compiler/mlir/utils/difftest.py`](../compiler/mlir/utils/difftest.py) compiles every program it is given, runs it
+natively and in the interpreter, and requires the same stdout, stderr and exit status. CI runs it over the golden
+tests, the benchmarks and `compiler/mlir/test/Run`:
+
+| Programs | Count |
+|---|---|
+| Compiled natively, same as the interpreter | 28 |
+| Compiled natively, different | 0 |
+| Not lowered yet (first reason: classes and structs 37, autograd 15, strings 7, containers 8, other built-ins 32) | 99 |
+| Rejected by the front end (error tests, and 6 programs that use `orbit` imports, which `nova-compile` does not resolve yet) | 95 |
+
+It found two bugs, both fixed:
+
+1. **The interpreter's `print(t)` printed a tensor's handle number.** `print` sent a `Tensor` down the integer path.
+   The native runtime printed the elements, so the outputs differed. The interpreter now prints the elements too.
+   Built before and after, the interpreter gives identical output on all 216 golden tests.
+2. **Integer division by zero was undefined behavior natively.** `arith.divsi` by zero, like LLVM's `sdiv`, is
+   undefined, and the binary printed 1 where the interpreter stops with "integer division by zero". Integer `/` and
+   `%` now emit `nova.check_divisor` (a runtime check, which canonicalize drops for a nonzero constant divisor) and
+   divide by 1 in the `INT_MIN / -1` case, which wraps to `INT_MIN` as the interpreter does.
+
+While making these pass, the harness also caught a third problem, in the new compiler itself. Its tensor ops
+declared only `MemAlloc` and `MemRead` effects, so canonicalize deleted an unused `a * b` whose shape mismatch was
+the error the test expected. Every op that can raise a runtime error now writes a `nova.runtime_error` resource
+([DESIGN.md](DESIGN.md), C9).
+
+## Quantum compilation for a neutral-atom machine
+
+[`compiler/mlir/utils/qbench.py`](../compiler/mlir/utils/qbench.py) compiles each benchmark circuit
+([`circuits.py`](../compiler/mlir/utils/circuits.py)) for the neutral-atom machine. It reports `--qnova-stats` at three
+points:
+- **logical:** the circuit as written;
+- **native:** after `--qnova-decompose` alone;
+- **compiled:** after the whole `--qnova-to-native` pipeline.
+
+It then runs the logical and the compiled circuit on the runtime's statevector simulator and requires the same
+probabilities to four places. CI runs it. Design: [QUANTUM.md](QUANTUM.md).
+
+Default grid (about twice as many sites as atoms):
+
+| Circuit | Qubits | Logical gates | Native | Compiled | Saved | cz | Moves | Depth | Compiled = logical |
+|---|---|---|---|---|---|---|---|---|---|
+| GHZ | 8 | 8 | 37 | 29 | 22% | 7 | 4 | 17 | ✓ |
+| GHZ | 12 | 12 | 57 | 45 | 21% | 11 | 7 | 25 | ✓ |
+| QFT, then its inverse | 5 | 33 | 283 | 3 | 99% | 0 | 0 | 1 | ✓ |
+| QFT, then its inverse | 8 | 76 | 764 | 4 | 99% | 0 | 0 | 1 | ✓ |
+| random | 6 | 60 | 260 | 203 | 22% | 40 | 8 | 140 | ✓ |
+| random | 8 | 120 | 483 | 355 | 27% | 68 | 26 | 242 | ✓ |
+| random | 10 | 200 | 692 | 548 | 21% | 100 | 33 | 312 | ✓ |
+| random | 12 | 300 | 1026 | 867 | 15% | 166 | 72 | 473 | ✓ |
+
+A tighter grid, 4 sites wide (`qbench.py --width 4`), changes only the routing:
+
+| Circuit | Moves (default grid) | Moves (width 4) | Depth (default) | Depth (width 4) |
+|---|---|---|---|---|
+| GHZ, 12 qubits | 7 | 7 | 25 | 27 |
+| random, 10 qubits | 33 | 29 | 312 | 311 |
+| random, 12 qubits | 72 | 70 | 473 | 482 |
+
+- **"Saved"** is the share of native gates removed by canonicalization: inverse pairs, merged rotations, diagonal
+  gates commuted through `cz`, and unobservable diagonal gates dropped.
+- **The QFT round trip** collapses to the `x` gates that prepare its input once canonicalization runs on the logical
+  gates before decomposition. Run on the native gates only, it saved 24–26%. That gap is why `--qnova-to-native`
+  canonicalizes twice.
+- **The first scheduler** placed atoms densely and failed to route the 12-qubit random circuit: every site next to an
+  atom was taken. Checkerboard placement on a sparser grid, with two fallbacks (move the other atom; park one atom
+  where there is room), routes every circuit here.

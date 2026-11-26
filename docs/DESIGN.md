@@ -162,9 +162,20 @@ asynchronous copies finish at once there, so a missing `cp.async` wait shows onl
 cores) and that it does it well: 95% of cuBLAS in FP32, against the hand-written 82%. Triton's design (tile-level
 ops, layouts in the IR, lowering a level at a time) is the model for Nova's own tensor path.
 
-## Proposed: step C, the `nova` dialect
+## Step C: the `nova` dialect, and native code through LLVM
 
-The plan for Nova IR as an MLIR dialect in SSA form (roadmap step C), for review before it is built.
+Nova IR as an MLIR dialect in SSA form (roadmap step C). C1–C6 were written as the plan before it was built; each
+now says what was built. C7–C13 are the decisions made while building it. The quantum dialect's decisions are in
+[QUANTUM.md](QUANTUM.md), summarized at the end of this section.
+
+| Decision | Status |
+|---|---|
+| C1. Lower from the checked tree | Built, as `compiler/mlir/lib/Lower/LowerTree.cpp` (`nova-lower`). The two lowerings are compared by differential testing (C13). |
+| C2. Upstream dialects where they fit | Built: `arith`, `scf`, `func`, `ub`, with `nova` ops for tensors, printing and checks. Arrays, objects and containers are not lowered yet. |
+| C3. Tensors are references | Built as references, with memory effects (C8). They lower to a C runtime (C11), not `linalg` yet. |
+| C4. Reference counting as ops | Not yet: tensors are not freed natively. |
+| C5. Native code through LLVM | Built: `nova-compile` (C12) writes LLVM IR and links with clang. There is no JIT. |
+| C6. Autograd as a transformation | Not yet. |
 
 ### C1. Lower from the checked tree, beside today's IR
 
@@ -266,8 +277,130 @@ works at the LLVM IR level, below where tensor ops are visible.
   to the Makefile; and scope, which the order above keeps small: step 2 alone gives a native compiler for a useful
   subset of Nova.
 
+### C7. SSA from a tree of mutable variables, with structured control flow
+
+**Decision.** Lowering keeps a map from each variable to the SSA value it holds at that point. Joins are expressed
+the structured way:
+- an `scf.if`'s results are its phis;
+- an `scf.while`'s block arguments carry the variables a loop changes;
+- `break`, `continue` and `return` become i1 flags that the loop carries and tests, because `scf` regions always
+  run to their end;
+- a `return` fills result slots that the function returns at its end;
+- a generic function lowers once per copy the check pass made, named with its types (`@"scale<int, int>"`).
+
+**Alternatives.** Lower to `cf` (basic blocks and branches) and let `mem2reg` build SSA; or emit `memref` slots per
+variable.
+
+**Why.** Structured control flow keeps loops and ifs visible to MLIR's analyses (LICM, region simplification) and
+to later `scf`-to-GPU lowerings, and the AST already has the structure, so nothing needs to be reconstructed. The
+flags fold away under canonicalize wherever the jump is static.
+
+### C8. Memory effects per value, not `Pure`; an element write is an effect
+
+**Decision.** Every tensor-making op declares `MemAlloc` on its result, and every tensor operand is `MemRead` or
+`MemWrite`. `t[i, j] = x` is a `nova.set`, an effect on the tensor `t` names, not a new SSA value for `t`, so
+loops and ifs never carry a tensor just because it is written.
+
+**Alternatives.** `Pure` ops, or every write making a new tensor value.
+
+**Why.** With `Pure`, CSE merged two `matmul`s into one tensor, and LICM hoisted a `zeros` out of a loop so every
+iteration shared it; once tensors can change, both are miscompiles. Per-value effects let MLIR's generic passes act
+correctly with no Nova code: an allocation is never merged or hoisted, and an unused one can still be removed.
+
+### C9. Runtime errors are an effect
+
+**Decision.** Every op that can stop the program writes a resource of its own, `nova.runtime_error`. That covers a
+shape mismatch, an index out of range, a negative size and a zero divisor.
+
+**Alternatives.** Treat a failing op like any other (removable when unused), or give it unknown effects.
+
+**Why.** Canonicalize deleted an unused `a * b` whose shape error was the program's observable behavior, and
+differential testing caught it (C13). A dedicated resource keeps those ops from being removed or moved, while
+leaving the ops that cannot fail (`nova.scale`, `nova.add_scalar`) free to optimize. The price is that two equal
+reads of one element no longer merge, since each may fail. Splitting each check into its own op that a pass can
+prove away is the next step; `nova.check_divisor` (C10) already works that way.
+
+### C10. Integer division as the interpreter defines it, not as LLVM does
+
+**Decision.** `a / b` on ints emits two things:
+- `nova.check_divisor %b`, which stops the program with "integer division by zero";
+- a division by `select(a == INT_MIN && b == -1, 1, b)`, so `INT_MIN / -1` is `INT_MIN`.
+
+`a % b` is `a - (a / b) * b`. The check's canonicalizer removes it when `b` is a constant other than 0.
+
+**Why.** LLVM's `sdiv` is undefined for both cases, and the native binary printed 1 where the interpreter
+reported the error. Dividing by 1 in the overflow case gives exactly the wrapped result without ever executing the
+undefined division. Removing the check for a constant divisor costs nothing in the common case: `int_loop`'s
+`i / 2` went from 3.7 ms to 1.0 ms once canonicalize ran first.
+
+### C11. Tensors through a C runtime first, not `linalg`
+
+**Decision.** `--convert-nova-to-runtime` lowers each `nova` op to a call into `runtime/nova_runtime.c`. The pass
+uses MLIR's dialect conversion: the whole dialect is illegal, and there is one pattern per op. A `TypeConverter`
+maps `!nova.tensor` to `!llvm.ptr`, and MLIR's structural conversions apply it to function signatures, calls,
+returns and `scf` regions.
+- **The runtime matches the interpreter exactly:** shapes, row broadcasting, the order of floating-point operations,
+  print format and error messages.
+- **Subscripts and sizes are passed as a count plus six i64 arguments,** so no caller has to build an array.
+- **A call that can fail takes the Nova line** for its message.
+
+**Alternatives.** `linalg` on `memref`, as C3 planned.
+
+**Why.** Correctness first: identical behavior is what makes differential testing meaningful, and the interpreter's
+semantics (dynamic rank, broadcasting rules, error messages) are easiest to match in C. The `linalg` path, which
+gives fusion and GPU code, can come per op later behind the same tests.
+
+### C12. One driver, in one process
+
+**Decision.** `nova-compile` runs, in one process:
+- the front end;
+- lowering;
+- the `--nova-to-llvm` pipeline (canonicalize, CSE, `--convert-nova-to-runtime`, then MLIR's `scf`, `arith`, `cf`,
+  `func` and `ub` conversions to `llvm`);
+- the translation to LLVM IR.
+
+It then calls clang to link with the runtime.
+
+**Alternatives.** The textual chain `nova-lower | nova-opt | mlir-translate | clang`.
+
+**Why.** Text loses source locations unless every tool prints them: the first runtime errors cited lines of the
+intermediate `.mlir` file instead of the Nova program. Two lessons from building it:
+- **The pass manager must be anchored on `builtin.module`.** One anchored on "any" nests a module pipeline and runs
+  it on modules *inside* the module, which means on nothing.
+- **The pipeline is a C++ function** (`buildNovaToLLVMPipeline`), shared by the driver and `nova-opt`'s registration.
+
+### C13. Differential testing as the correctness oracle
+
+**Decision.** `utils/difftest.py` runs every program both natively and interpreted, and requires identical stdout,
+stderr and exit status. CI runs it on the golden tests, the benchmarks and the native run tests. A program the
+native path does not cover yet is counted with its reason, not failed.
+
+**Why.** The interpreter is a complete specification of Nova that already exists. Comparing against it tests every
+program, not just the ones with hand-written expectations. It found two real bugs (the interpreter's `print(t)`
+printed a tensor's handle; native integer division by zero was undefined) and caught C9's problem in the new
+compiler. All 28 programs that compile natively match ([BENCHMARKS.md](BENCHMARKS.md)).
+
+### Q. The quantum dialect, `qnova`
+
+Full record: [QUANTUM.md](QUANTUM.md).
+- **Qubits are SSA values, as in QSSA and Catalyst.** Def-use chains are the circuit's wires, and a `LinearQubits`
+  op trait puts no-cloning in the verifier.
+- **Gates are `Pure`.** CSE cannot merge two without a value used twice, and the no-signaling theorem makes a gate on
+  an unmeasured qubit dead.
+- **Logical gates decompose into a neutral-atom native set:** Raman `r(θ, φ)` and `rz`, and Rydberg `cz`.
+- **Canonicalization runs before and after decomposition.** Before, on the logical gates, a QFT followed by its
+  inverse cancels entirely; on the native gates alone, only 24–26% goes. Diagonal gates are commuted through `cz`
+  and dropped where unobservable (on |0⟩, before readout).
+- **Routing moves atoms instead of inserting SWAPs**, which is the defining capability of neutral-atom hardware.
+  Placement is a checkerboard on a sparse grid. Scheduling packs ops into single-kind layers, with parallel `cz`
+  kept apart by the blockade radius.
+- **Every compiled circuit is checked against its logical form on a statevector simulator,** in CI: the same
+  differential idea as C13.
+
 ## Still open
 
 - Reference counting leaves cycles; `weak` fields are planned.
-- `int` is 32 bits and overflows silently.
-- The IR is a slot-numbered instruction list; step C replaces it with an MLIR dialect in SSA form.
+- `int` is 32 bits and overflows silently. The native path wraps exactly as the interpreter does.
+- The interpreter's IR is a slot-numbered instruction list. The MLIR path replaces it program by program: today 28 of
+  the test and benchmark programs compile natively; classes, autograd, strings and containers are next.
+- Natively compiled tensors are never freed (C4).
