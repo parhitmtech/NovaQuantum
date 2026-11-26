@@ -2,6 +2,7 @@
 // process.
 //
 //   nova-compile prog.nova -o prog              the executable (clang links it with Nova's C runtime)
+//   nova-compile circuit.qasm -o circuit        an OpenQASM 3 (or 2) circuit, read as qnova, then as below
 //   nova-compile circuit.mlir -o circuit        a qnova circuit: compiled for a neutral-atom machine (decomposed into
 //                                               its native gates, optimized, routed and scheduled), then run on the
 //                                               runtime's simulator; --logical runs it as written instead
@@ -27,6 +28,7 @@
 #include "Nova/Passes.h"
 #include "QNova/QNovaDialect.h"
 #include "QNova/QNovaPasses.h"
+#include "QASM/OpenQASM.h"
 #include "Atom/AtomDialect.h"
 #include "Atom/AtomPasses.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -44,6 +46,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -75,6 +78,17 @@ int main(int argc, char** argv)
     {
         module = mlir::parseSourceFile<mlir::ModuleOp>(input, &context);
         if (!module) return 1;  // the parser has reported why
+    }
+    else if (llvm::StringRef(input).ends_with(".qasm"))  // an OpenQASM circuit, from another toolchain
+    {
+        auto buffer = llvm::MemoryBuffer::getFile(input);
+        if (!buffer)
+        {
+            llvm::errs() << "Error: cannot open '" << input << "'\n";
+            return 1;
+        }
+        module = qasm::importOpenQASM((*buffer)->getBuffer(), input, &context);
+        if (!module) return 1;  // the importer has reported why
     }
     else
     {

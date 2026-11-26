@@ -7,6 +7,7 @@ target_link_libraries(nova-compile PRIVATE
     NovaConversion
     MLIRQNova
     MLIRAtom
+    NovaQASM
     MLIRParser
     MLIRPass
     MLIRTargetLLVMIRExport

@@ -259,6 +259,37 @@ routing rather than gate count dominates a circuit's run time, which is what a m
 Reproduce the table with `python3 compiler/mlir/utils/qbench.py --build <build dir>`, or pass `--width 4` to see the
 effect of a tighter grid.
 
+## OpenQASM 3: circuits in and out, and Qiskit as an outside check
+
+OpenQASM is the text format quantum toolchains exchange circuits in: Qiskit, CUDA-Q, hardware providers.
+`nova-translate`, Nova's `mlir-translate`, converts both ways, and `nova-compile` reads `.qasm` files directly.
+
+- **Export** (`--qnova-to-openqasm`). Each SSA qubit value is followed back to its allocation, so the chains become
+  the named wires OpenQASM writes: `%a2, %b1 = qnova.cx %a1, %b0` is `cx q[0], q[1];`. Gates map to `stdgates.inc`
+  names, except the native `r(θ, φ)`, which is `U(θ, φ − π/2, π/2 − φ)`. What OpenQASM has no statement for goes into
+  comments, which other tools skip and the importer reads back: `// nova.probs q[0], q[1]` and
+  `// nova.move q[3] to [1, 0]`.
+- **Import** (`--openqasm-to-qnova`). A recursive-descent parser for the straight-line circuits toolchains emit:
+  - `qubit[n] q;` and OpenQASM 2's `qreg`;
+  - the standard gates, including `U`, `p`, `sdg` and `tdg`;
+  - both measurement forms;
+  - `barrier`;
+  - constant angle expressions such as `-3*pi/4` or `1.5e-1`.
+
+  It builds SSA the way Nova's lowering does: each named qubit holds its wire's current value, and a gate replaces
+  it. Gate definitions, control flow and modifiers are reported at their line as not read yet.
+
+**Checked against Qiskit**, an independent simulator (`utils/qiskit_check.py`, in CI):
+- **Nova → Qiskit:** every benchmark circuit is exported twice, as written and *as compiled for the machine*
+  (decomposed, optimized, routed). Qiskit's statevector must give Nova's probabilities for both. That checks the
+  decompositions, the canonicalizations and the `r`-as-`U` export with a simulator that isn't Nova's.
+- **Qiskit → Nova:** 24 of Qiskit's random circuits (2–10 qubits, up to 271 gates, in its standard gates) go in
+  through OpenQASM and run as written, compiled to native gates, and compiled to hardware instructions. Each must
+  give Qiskit's probabilities.
+
+All 88 comparisons agree. The differences that remain, at most 5 × 10⁻⁵, are Nova printing probabilities to four
+places.
+
 ## On the GPU
 
 The simulator also runs on a GPU ([`compiler/mlir/runtime/gpu`](../compiler/mlir/runtime/gpu/README.md)): the same
@@ -292,6 +323,8 @@ qubits the GPU is 256–529× faster than one CPU core and 21–37× faster than
 - `test/Atom/ops.mlir`, `invalid.mlir`, `unscheduled.mlir`: the instructions round-trip; a Rydberg pair must be
   neighbours; a circuit must be scheduled first.
 - `test/Run/hardware.mlir`: a circuit compiled to hardware instructions, run by site, gives the logical probabilities.
+- `test/QASM/export.mlir`, `import.qasm`, `errors.qasm`, `unknown.qasm`: OpenQASM out and in, and the errors.
+- `test/Run/qasm.qasm`: an OpenQASM 2 circuit compiled to hardware instructions and run.
 
 ## What would come next
 

@@ -136,6 +136,13 @@ jobs:
       # same probabilities as written, on the runtime's simulator (compiler/mlir/utils/qbench.py)
       - name: Quantum circuits, compiled against logical, on the simulator
         run: python3 compiler/mlir/utils/qbench.py --build build/mlir
+      # The quantum pipeline against an outside simulator: circuits through OpenQASM 3 to and from Qiskit
+      # (compiler/mlir/utils/qiskit_check.py)
+      - name: Quantum circuits against Qiskit, through OpenQASM
+        run: |
+          python3 -m venv /tmp/qiskit
+          /tmp/qiskit/bin/pip install --quiet qiskit qiskit-qasm3-import
+          /tmp/qiskit/bin/python compiler/mlir/utils/qiskit_check.py --build build/mlir
 
   frontend:
     name: Frontend lint and build

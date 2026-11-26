@@ -327,3 +327,16 @@ state, and a Bell pair from hardware instructions by site. The two print byte-id
 **Speedups.** At 20–24 qubits, the GPU is 256–529× faster than one CPU thread and 21–37× faster than all 16
 cores. A 28-qubit, 695-gate circuit (a 4 GiB state) runs in 3.1 s. On the CPU with 16 threads, the 24-qubit one
 alone takes 5.8 s.
+
+## Against Qiskit, through OpenQASM
+
+[`compiler/mlir/utils/qiskit_check.py`](../compiler/mlir/utils/qiskit_check.py) checks the quantum pipeline with a
+simulator that isn't Nova's: Qiskit 2.6's statevector. Circuits cross in OpenQASM 3 (`nova-translate`).
+
+| Direction | Circuits | Forms compared | Comparisons | Different | Largest difference |
+|---|---|---|---|---|---|
+| Nova → Qiskit | the 8 benchmark circuits (GHZ, QFT round trips, random, up to 12 qubits) | as written; compiled for the machine | 16 | 0 | 5.0e-05 |
+| Qiskit → Nova | 24 random circuits (2–10 qubits, 11–271 gates) | as written; native gates; hardware instructions | 72 | 0 | 5.0e-05 |
+
+The largest differences are Nova's four-place printing; where a circuit's probabilities are exact (GHZ, the QFT
+round trip), the two agree to 10⁻¹⁶.
