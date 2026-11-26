@@ -20,6 +20,10 @@ namespace nova
 mlir::OwningOpRef<mlir::ModuleOp> lower_to_mlir(mlir::MLIRContext& context, const ParseTree& tree,
                                                 const CheckResult& checked, const std::string& file,
                                                 std::string& error);
+
+// The program in the file at path, read, checked and lowered: the front end and lower_to_mlir, then MLIR's verifier.
+// Null with the errors in 'error', one per line.
+mlir::OwningOpRef<mlir::ModuleOp> lower_file(mlir::MLIRContext& context, const std::string& path, std::string& error);
 }  // namespace nova
 
 #endif  // NOVA_LOWERTREE_H

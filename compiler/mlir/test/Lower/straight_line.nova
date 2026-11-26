@@ -26,9 +26,11 @@ ignite:
     x = x * y
     # CHECK: %[[X3:.*]] = arith.addi %[[X2]], %{{.*}} : i32
     x += 1
-    # CHECK: arith.divsi %[[X3]], %[[Y]] : i32
+    # CHECK: nova.check_divisor %[[Y]] : i32
+    # CHECK: arith.divsi %[[X3]], %{{.*}} : i32
     print(x / y)
-    # CHECK: arith.remsi %[[X3]], %[[Y]] : i32
+    # CHECK: arith.divsi %[[X3]], %{{.*}} : i32
+    # CHECK: arith.subi %[[X3]], %{{.*}} : i32
     print(x % y)
 
     # a float literal is an f32, widened where a double is wanted

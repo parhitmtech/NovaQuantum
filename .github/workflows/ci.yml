@@ -124,6 +124,14 @@ jobs:
           -DLLVM_EXTERNAL_LIT="$(command -v lit)"  # pipx's bin dir differs by machine
       - name: Build nova-opt and run the dialect tests
         run: ninja -C build/mlir check-nova
+      # Every program nova-compile compiles must behave as the interpreter does: the same stdout, stderr and exit
+      # status (compiler/mlir/utils/difftest.py)
+      - name: Build the interpreter
+        run: make -C compiler -j4
+      - name: Differential test, native code against the interpreter
+        run: >-
+          python3 compiler/mlir/utils/difftest.py --build build/mlir --interpreter compiler/build/nova
+          compiler/tests compiler/benchmarks compiler/benchmarks/compare compiler/mlir/test/Run
 
   frontend:
     name: Frontend lint and build

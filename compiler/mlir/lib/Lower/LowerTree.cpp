@@ -42,6 +42,8 @@
 #include "Nova/LowerTree.h"
 
 #include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <string>
 
 #include "check.h"  // the front end: the parse tree and the check pass's result
@@ -53,6 +55,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/UB/IR/UBOps.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/Verifier.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 
@@ -128,6 +131,7 @@ class Lowerer
         mlir::Value logical(uint32_t n);
         mlir::Value arithmetic(uint32_t n, TokenType op, mlir::Value left, mlir::Value right, mlir::Type t);
         mlir::Value compare(uint32_t n, TokenType op, mlir::Value left, mlir::Value right);
+        mlir::Value int_divide(uint32_t n, mlir::Value a, mlir::Value b, bool remainder);  // a / b or a % b
         mlir::Value tensor_arith(uint32_t n, TokenType op, mlir::Value left, mlir::Value right);  // a tensor on a side
         mlir::Value negate(uint32_t n, mlir::Value t);  // -t, a new tensor
         llvm::SmallVector<mlir::Value> call(uint32_t n);  // the values it gives: none, one, or several
@@ -807,10 +811,33 @@ mlir::Value Lowerer::arithmetic(uint32_t n, TokenType op, mlir::Value l, mlir::V
         case PLUS:   return builder.create<mlir::arith::AddIOp>(at, l, r);
         case MINUS:  return builder.create<mlir::arith::SubIOp>(at, l, r);
         case MULT:   return builder.create<mlir::arith::MulIOp>(at, l, r);
-        case DIV:    return builder.create<mlir::arith::DivSIOp>(at, l, r);
-        case MOD:    return builder.create<mlir::arith::RemSIOp>(at, l, r);
+        case DIV:    return int_divide(n, l, r, false);
+        case MOD:    return int_divide(n, l, r, true);
         default:     return fail(n, "this operator");
     }
+}
+
+// a / b and a % b on ints, as the interpreter computes them. Dividing by zero stops the program with an error
+// (nova.check_divisor), where arith.divsi would be undefined. INT_MIN / -1 is INT_MIN, wrapping as the hardware
+// would, where LLVM's sdiv is undefined too: so the divisor is 1 in that one case, and INT_MIN / 1 is INT_MIN. And
+// a % b is a - (a / b) * b, the interpreter's form, with its wrapping (INT_MIN % -1 is 0).
+mlir::Value Lowerer::int_divide(uint32_t n, mlir::Value a, mlir::Value b, bool remainder)
+{
+    mlir::Location at = loc(n);
+    mlir::Type t = a.getType();
+    auto constant = [&](int64_t v) {
+        return builder.create<mlir::arith::ConstantOp>(at, builder.getIntegerAttr(t, v)).getResult();
+    };
+    builder.create<nova::CheckDivisorOp>(at, b);
+    int64_t min = llvm::APInt::getSignedMinValue(t.getIntOrFloatBitWidth()).getSExtValue();
+    mlir::Value isMin = builder.create<mlir::arith::CmpIOp>(at, mlir::arith::CmpIPredicate::eq, a, constant(min));
+    mlir::Value isMinusOne = builder.create<mlir::arith::CmpIOp>(at, mlir::arith::CmpIPredicate::eq, b, constant(-1));
+    mlir::Value overflow = builder.create<mlir::arith::AndIOp>(at, isMin, isMinusOne);
+    mlir::Value divisor = builder.create<mlir::arith::SelectOp>(at, overflow, constant(1), b);
+    mlir::Value quotient = builder.create<mlir::arith::DivSIOp>(at, a, divisor);
+    if (!remainder) return quotient;
+    mlir::Value product = builder.create<mlir::arith::MulIOp>(at, quotient, b);
+    return builder.create<mlir::arith::SubIOp>(at, a, product);
 }
 
 // a < b and the rest give an i1. Both sides become one type first: the wider float if either is one, else i32.
@@ -1017,4 +1044,49 @@ mlir::OwningOpRef<mlir::ModuleOp> nova::lower_to_mlir(mlir::MLIRContext& context
                                                       std::string& error)
 {
     return Lowerer(context, tree, checked, file).run(error);
+}
+
+// The front end as the interpreter's driver runs it (main.cc), without imports for now, then lowering, then MLIR's
+// verifier as a last check on lowering itself
+mlir::OwningOpRef<mlir::ModuleOp> nova::lower_file(mlir::MLIRContext& context, const std::string& path,
+                                                   std::string& error)
+{
+    std::ifstream file(path);
+    if (!file)
+    {
+        error = "Error: cannot open '" + path + "'";
+        return nullptr;
+    }
+    std::stringstream source;
+    source << file.rdbuf();
+
+    std::vector<LexToken> tokens = scan_program(source.str());
+    ParseTree tree = build_parse_tree(tokens);
+    std::vector<std::string> errors = tree.errors;
+    CheckResult checked;
+    if (errors.empty())
+    {
+        checked = check_tree(tree);
+        errors = checked.errors;
+    }
+    if (!errors.empty())
+    {
+        error.clear();
+        for (const std::string& e : errors) error += (error.empty() ? "" : "\n") + e;
+        return nullptr;
+    }
+
+    // The dialects lowering writes: their ops can be made only once they are loaded
+    context.loadDialect<nova::NovaDialect, mlir::arith::ArithDialect, mlir::func::FuncDialect, mlir::scf::SCFDialect,
+                        mlir::ub::UBDialect>();
+    mlir::OwningOpRef<mlir::ModuleOp> module = lower_to_mlir(context, tree, checked, path, error);
+    if (!module) return nullptr;
+    // Every op's own verifier, and SSA's rule that a value is defined before it is used. A failure here is a bug
+    // in LowerTree.cpp, not in the program.
+    if (mlir::failed(mlir::verify(*module)))
+    {
+        error = "Error: lowering made invalid MLIR (a bug in nova-lower)";
+        return nullptr;
+    }
+    return module;
 }

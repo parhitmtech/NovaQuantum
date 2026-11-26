@@ -1,0 +1,17 @@
+# RUN: nova-compile %s -o %t.exe
+# RUN: not %t.exe 2>&1 | FileCheck %s
+#
+# Integer division by zero stops the program, as in the interpreter, where LLVM's sdiv would be undefined; and
+# INT_MIN / -1 is INT_MIN (it wraps), with INT_MIN % -1 0.
+
+ignite:
+    int min = -2147483647 - 1
+    int m = -1
+    # CHECK: -2147483648
+    print(min / m)
+    # CHECK-NEXT: 0
+    print(min % m)
+    int zero = 0
+    # CHECK-NEXT: Runtime error at line [[@LINE+1]]: integer division by zero
+    print(7 / zero)
+    print(1)

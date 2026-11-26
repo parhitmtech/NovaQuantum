@@ -5,10 +5,17 @@
 # return flag, the code it skips tests the flag, every loop around it ends, and the func.return at the end
 # returns the slots. Where the jumps are decided statically, canonicalize folds the flag away (FOLD).
 
-# Several values: one result each. No jump to skip anything, so no flag is tested.
+# Several values: one result each. No jump to skip anything, so no flag is tested. An int division first checks its
+# divisor (dividing by zero stops the program, as in the interpreter), divides by 1 instead in the one case that
+# would overflow (INT_MIN / -1 is INT_MIN), and a % b is a - (a / b) * b.
 # CHECK-LABEL: func.func @divmod(%arg0: i32, %arg1: i32) -> (i32, i32) {
-# CHECK:   %[[Q:.*]] = arith.divsi %arg0, %arg1 : i32
-# CHECK:   %[[R:.*]] = arith.remsi %arg0, %arg1 : i32
+# CHECK:   nova.check_divisor %arg1 : i32
+# CHECK:   %[[SAFE:.*]] = arith.select %{{.*}}, %{{.*}}, %arg1 : i32
+# CHECK:   %[[Q:.*]] = arith.divsi %arg0, %[[SAFE]] : i32
+# CHECK:   nova.check_divisor %arg1 : i32
+# CHECK:   %[[Q2:.*]] = arith.divsi %arg0, %{{.*}} : i32
+# CHECK:   %[[P:.*]] = arith.muli %[[Q2]], %arg1 : i32
+# CHECK:   %[[R:.*]] = arith.subi %arg0, %[[P]] : i32
 # CHECK:   return %[[Q]], %[[R]] : i32, i32
 def divmod(int a, int b) -> int, int:
     return a / b, a % b

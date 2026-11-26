@@ -12,6 +12,10 @@ namespace nova
 // an i32, as C's main does
 std::unique_ptr<mlir::Pass> createConvertNovaToRuntimePass();
 
+// The --nova-to-llvm pipeline: canonicalize and CSE, --convert-nova-to-runtime, then MLIR's conversions of scf, arith,
+// cf, func and ub to the llvm dialect. pm runs on the module.
+void buildNovaToLLVMPipeline(mlir::OpPassManager& pm);
+
 // Registers the passes above and the --nova-to-llvm pipeline with nova-opt's command line
 void registerPasses();
 }  // namespace nova

@@ -57,7 +57,9 @@ ignite:
     # FOLD-LABEL: func.func @main()
     # FOLD: scf.while ({{.*}}) : (i32, i32) -> (i32, i32) {
     # FOLD: ^bb0(%[[FK:.*]]: i32, %[[FODD:.*]]: i32):
-    # FOLD:   %[[REM:.*]] = arith.remsi %[[FK]], %{{.*}} : i32
+    # FOLD:   %[[HALF:.*]] = arith.divsi %[[FK]], %{{.*}} : i32
+    # FOLD:   %[[EVEN:.*]] = arith.muli %[[HALF]], %{{.*}} : i32
+    # FOLD:   %[[REM:.*]] = arith.subi %[[FK]], %[[EVEN]] : i32
     # FOLD:   %[[ISODD:.*]] = arith.cmpi ne, %[[REM]], %{{.*}} : i32
     # FOLD:   scf.if %[[ISODD]] -> (i32) {
     # FOLD:     arith.addi %[[FODD]], %[[FK]] : i32

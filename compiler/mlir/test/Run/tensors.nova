@@ -1,0 +1,53 @@
+# RUN: nova-compile %s -o %t.exe
+# RUN: %t.exe > %t.out
+# RUN: diff %t.out %S/Inputs/tensors.expected
+#
+# Tensors compiled to native code: each nova op is a call into the C runtime, which computes and prints as the
+# interpreter does. Matmul, row broadcasting on either side of +, element-wise ops, the forms with a number (t / k is
+# t * (1 / k)), a tensor through an if, element writes and +=, a rank-3 tensor, and a batched matmul.
+# Inputs/tensors.expected is the interpreter's output for this program, byte for byte.
+
+def mm(Tensor a, Tensor b) -> Tensor:
+    return a @ b
+
+def t_sum_check(Tensor t) -> double:
+    double s = 0.0
+    for (int i = 0; i < 2; i += 1):
+        for (int j = 0; j < 2; j += 1):
+            s += t[i, j]
+    return s
+
+ignite:
+    int n = 3
+    Tensor a = ones(2, n)
+    Tensor b = zeros(n, 2)
+    for (int i = 0; i < n; i += 1):
+        b[i, 0] = i + 1
+        b[i, 1] = 2 * i
+    print(mm(a, b))
+    Tensor row = ones(1, 3)
+    print(a + row)
+    print(row + a)
+    print(a - row)
+    print(a * a)
+    print(a / (a + 1.0))
+    print(10.0 - a)
+    print(-b)
+    print(b / 3.0)
+    Tensor d
+    if (n > 2):
+        d = a @ b
+    else:
+        d = matmul(b, a)
+    print(d)
+    d[0, 1] += 0.25
+    print(tensor_get(d, 0, 1))
+    tensor_set(d, 1, 1, 7)
+    print(d)
+    Tensor z = zeros(2, 2, 3)
+    z[1, 0, 2] = 5.0
+    print(z)
+    Tensor w = ones(2, 3, 2)
+    print(z @ w)
+    print(t_sum_check(d))
+
