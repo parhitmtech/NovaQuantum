@@ -43,7 +43,7 @@ export const EXAMPLES = [
     title: 'OpenQASM circuit',
     description: 'A GHZ state, compiled down to hardware instructions',
     code:
-      '// OpenQASM 3, as Qiskit or CUDA-Q write it: compiled to a neutral-atom machine\'s timed instructions\n' +
+      "// OpenQASM 3, as Qiskit or CUDA-Q write it: compiled to a neutral-atom machine's timed instructions\n" +
       'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[3] q;\nh q[0];\ncx q[0], q[1];\ncx q[1], q[2];\n',
   },
 ]

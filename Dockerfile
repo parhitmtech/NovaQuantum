@@ -26,7 +26,8 @@ RUN cmake -G Ninja -S compiler/mlir -B build -DMLIR_DIR=/usr/lib/llvm-20/lib/cma
 FROM debian:bookworm-slim AS worker
 # libllvm20 (LLVM's shared library, which nova-compile links) from the same signed repository
 COPY --from=native-build /etc/apt/trusted.gpg.d/apt.llvm.org.asc /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-RUN echo "deb http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-20 main" > /etc/apt/sources.list.d/llvm.list \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && echo "deb http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-20 main" > /etc/apt/sources.list.d/llvm.list \
     && apt-get update && apt-get install -y --no-install-recommends libstdc++6 coreutils libllvm20 \
     && rm -rf /var/lib/apt/lists/* /etc/apt/sources.list.d/llvm.list
 WORKDIR /opt/nova
