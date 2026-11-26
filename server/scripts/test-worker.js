@@ -34,6 +34,40 @@ const { createExecutor } = require('../src/services/execution');
     assert.ok(fs.statSync(output).size > 0, 'worker must write its output file into the job directory');
     console.log('Production worker wrote an output file into its job directory.');
 
+    // A quantum program runs through the native compiler, in the same sandbox: compiled through MLIR and LLVM in
+    // memory (--run) and run on the simulator. Teleportation: c always ends in a's state, |1> with probability 0.75.
+    const quantum = [
+      'ignite:',
+      '    qubit a = qpu.alloc()', '    qubit b = qpu.alloc()', '    qubit c = qpu.alloc()',
+      '    qpu.ry(a, 2.0943951023931953)', '    qpu.h(b)', '    qpu.cx(b, c)', '    qpu.cx(a, b)', '    qpu.h(a)',
+      '    bool m1 = qpu.measure(a)', '    bool m2 = qpu.measure(b)',
+      '    if (m2):', '        qpu.x(c)', '    if (m1):', '        qpu.z(c)',
+      '    qpu.probs(c)', '',
+    ].join('\n');
+    fs.writeFileSync(source, quantum);
+    const run = executor.spawnCompiler([source], { cwd: dir, userId: 'worker-test', native: true });
+    let qout = '', qerr = '';
+    run.stdout.on('data', data => { qout += data });
+    run.stderr.on('data', data => { qerr += data });
+    const [qcode] = await once(run, 'close');
+    assert.equal(qcode, 0, qerr);
+    assert.equal(qout.trim(), '|0>: 0.2500\n|1>: 0.7500');
+    assert.match(qerr, /qnova-stats @main: 3 qubits/);
+    console.log('Production worker compiled a quantum program with its JIT and ran it on the simulator.');
+
+    // An OpenQASM circuit, compiled down to the neutral-atom machine's timed instructions
+    const circuit = path.join(dir, 'program.qasm');
+    fs.writeFileSync(circuit, 'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[2] q;\nh q[0];\ncx q[0], q[1];\n');
+    const qasm = executor.spawnCompiler([circuit], { cwd: dir, userId: 'worker-test', native: true });
+    let aout = '', aerr = '';
+    qasm.stdout.on('data', data => { aout += data });
+    qasm.stderr.on('data', data => { aerr += data });
+    const [acode] = await once(qasm, 'close');
+    assert.equal(acode, 0, aerr);
+    assert.equal(aout.trim(), '|00>: 0.5000\n|11>: 0.5000');
+    assert.match(aerr, /atom-timing @main/);
+    console.log('Production worker ran an OpenQASM circuit as hardware instructions.');
+
     // Launch directly in detached mode: no executor/Node timer can stop this job.
     // Detached -i keeps stdin open; input() blocks without hitting Nova's instruction cap.
     fs.writeFileSync(source, 'ignite:\n    int x = input()\n    print(x)\n');

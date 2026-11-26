@@ -13,6 +13,8 @@
 //   --hardware                                  compile a circuit down to the machine's timed instructions (the atom
 //                                               dialect), which the simulator runs by site; with --qnova-stats, it
 //                                               prints their run time too
+//   --run                                       compile in memory (LLVM's JIT) and run at once: no file written, no
+//                                               clang (the IDE's sandbox runs programs this way)
 //   --gpu                                       link with the GPU runtime (runtime/gpu: make there first), so the
 //                                               circuits run on the GPU simulator; NOVA_GPU_RUNTIME and CUDA_HOME
 //                                               override where it and CUDA are
@@ -20,6 +22,7 @@
 // It is nova-lower | nova-opt --nova-to-llvm | mlir-translate --mlir-to-llvmir | clang, without the text in between:
 // the module stays in memory, so every op keeps the Nova line it came from, which the runtime's error messages
 // print. clang then optimizes (-O2 unless -O0 is given) and links.
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 
@@ -42,6 +45,9 @@
 #include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Export.h"
+#include "mlir/ExecutionEngine/ExecutionEngine.h"
+#include "mlir/ExecutionEngine/OptUtils.h"
+#include "llvm/Support/TargetSelect.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
@@ -60,6 +66,7 @@ static cl::opt<bool> noOptimize("O0", cl::desc("Have clang compile without optim
 static cl::opt<bool> logical("logical", cl::desc("Run a circuit as written, without compiling it for the machine"));
 static cl::opt<bool> stats("qnova-stats", cl::desc("Print each circuit's gates, moves and depth as compiled"));
 static cl::opt<bool> hardware("hardware", cl::desc("Compile a circuit down to the machine's timed instructions"));
+static cl::opt<bool> run("run", cl::desc("Compile in memory (JIT) and run, writing nothing"));
 static cl::opt<bool> gpu("gpu", cl::desc("Link with the GPU runtime (runtime/gpu): circuits run on the GPU"));
 
 int main(int argc, char** argv)
@@ -106,7 +113,7 @@ int main(int argc, char** argv)
     if (stats) native.addNestedPass<mlir::func::FuncOp>(qnova::createStatsPass());
     if (hardware && !logical)
     {
-        native.addNestedPass<mlir::func::FuncOp>(atom::createQNovaToAtomPass());
+        native.addNestedPass<mlir::func::FuncOp>(atom::createQNovaToAtomPass(/*skipUnscheduled=*/true));
         if (stats) native.addNestedPass<mlir::func::FuncOp>(atom::createTimingPass());
     }
     if (mlir::failed(native.run(*module)))
@@ -138,6 +145,33 @@ int main(int argc, char** argv)
     // The llvm dialect to LLVM IR, as mlir-translate --mlir-to-llvmir does
     mlir::registerBuiltinDialectTranslation(context);
     mlir::registerLLVMDialectTranslation(context);
+
+    // --run: compile the module to machine code in this process (LLVM's ORC JIT, through MLIR's ExecutionEngine) and
+    // call its main. The runtime's functions are linked into this program and exported (-rdynamic), so the JIT finds
+    // them in the process. Nothing is written to disk and no compiler or linker runs: the IDE's sandbox, a read-only
+    // container whose /tmp cannot hold executables, can run it.
+    if (run)
+    {
+        llvm::InitializeNativeTarget();
+        llvm::InitializeNativeTargetAsmPrinter();
+        mlir::ExecutionEngineOptions options;
+        options.transformer = mlir::makeOptimizingTransformer(noOptimize ? 0 : 2, 0, nullptr);
+        auto engine = mlir::ExecutionEngine::create(*module, options);
+        if (!engine)
+        {
+            llvm::errs() << "Error: compiling to machine code failed: " << llvm::toString(engine.takeError()) << "\n";
+            return 1;
+        }
+        int32_t status = 0;
+        llvm::SmallVector<void*> packed{&status};  // the packed wrapper's arguments: main has none, then its result
+        if (llvm::Error e = (*engine)->invokePacked("main", packed))
+        {
+            llvm::errs() << "Error: running main failed: " << llvm::toString(std::move(e)) << "\n";
+            return 1;
+        }
+        fflush(stdout);
+        return status;
+    }
     llvm::LLVMContext llvmContext;
     std::unique_ptr<llvm::Module> ir = mlir::translateModuleToLLVMIR(*module, llvmContext, input);
     if (!ir)

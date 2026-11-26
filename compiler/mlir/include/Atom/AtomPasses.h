@@ -9,7 +9,8 @@
 namespace atom
 {
 // --qnova-to-atom: a scheduled qnova circuit as timed hardware instructions, under a timing model (its options)
-std::unique_ptr<mlir::Pass> createQNovaToAtomPass();
+// With skipUnscheduled, a circuit the scheduler left unplaced (one with control flow) stays at native gates
+std::unique_ptr<mlir::Pass> createQNovaToAtomPass(bool skipUnscheduled = false);
 
 // --atom-timing: prints each program's instructions, layers and run time, by kind of instruction
 std::unique_ptr<mlir::Pass> createTimingPass();

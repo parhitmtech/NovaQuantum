@@ -7,7 +7,8 @@ const security = require('../services/security');
 const { S3_BUCKET, FILES_TABLE, MAX_OUTPUT_BYTES, MAX_CONCURRENT, MAX_EXECUTION_MS, BENCH_ITERS, getExecutionTimeout } = require('../config');
 const { log } = require('../lib/logger');
 const { dynamo, s3 } = require('../services/aws');
-const { executions, filterStderr, sanitizeSource, validateSource, writeTempFile, cleanupTempFile, runCompiler, parseBenchStats } = require('../services/compiler-runner');
+const { executions, filterStderr, sanitizeSource, validateSource, writeTempFile, cleanupTempFile, runCompiler, parseBenchStats,
+  isNativeProgram } = require('../services/compiler-runner');
 const { spawnCompiler } = require('../services/execution');
 const { PutCommand } = require('@aws-sdk/lib-dynamodb');
 const { PutObjectCommand } = require('@aws-sdk/client-s3');
@@ -45,7 +46,8 @@ router.post("/run", async (req, res) => {
   log("info", "Execution started", { activeExecutions: executions.active, sourceLength: source.length, timeout, ip: req.ip });
 
   try {
-    const { stdout, stderr, ms, exitCode } = await runCompiler(tmpFile, [], inputs, timeout, req.user.userId);
+    const { stdout, stderr, ms, exitCode } = await runCompiler(tmpFile, [], inputs, timeout, req.user.userId,
+                                                               isNativeProgram(source));
     log("info", "Execution finished", { ms, exitCode, stdoutLength: stdout.length, activeExecutions: executions.active });
     const terminalOutput = filterStderr(stderr) || "";
     if (stdout && stdout.trim().length > 0)
@@ -78,7 +80,11 @@ router.post("/run-stream", async (req, res) => {
 
     const execTimeout = getExecutionTimeout(source);
     let child;
-    try { child = spawnCompiler([tmpFile], { cwd: tmpDir, timeoutMs: execTimeout, userId: req.user.userId }); }
+    // A quantum program or an OpenQASM circuit runs through the native compiler (isNativeProgram)
+    try {
+      child = spawnCompiler([tmpFile], { cwd: tmpDir, timeoutMs: execTimeout, userId: req.user.userId,
+                                        native: isNativeProgram(source) });
+    }
     catch (err) { cleanupTempFile(tmpFile, tmpDir); return res.status(503).json({ error: err.message }); }
 
     res.setHeader('Content-Type', 'text/event-stream');

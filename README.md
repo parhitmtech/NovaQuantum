@@ -123,6 +123,10 @@ a block argument, and an `if` carries it out as a result:
   Nova's circuits exported as written and as compiled for the machine, and Qiskit's random circuits imported and
   run as written, as native gates and as hardware instructions
   ([BENCHMARKS.md](docs/BENCHMARKS.md#against-qiskit-through-openqasm)).
+- **In the cloud IDE.** NovaComp runs quantum programs and OpenQASM circuits in its sandbox: the server sends them to
+  `nova-compile --run`, which compiles them through MLIR and LLVM in memory with LLVM's JIT (no file written, no
+  `clang` in the read-only sandbox) and runs them on the simulator, showing the compiled circuit's stats and hardware
+  time. The worker smoke test in CI runs teleportation and an OpenQASM circuit through the real container.
 - **On the GPU.** A CUDA statevector simulator (one coalesced kernel per gate) is a drop-in for the runtime
   (`nova-compile --gpu`). On an A100-80GB it matches the CPU to 10⁻¹⁷ and sustains **1.6 TB/s, 77–81% of peak
   memory bandwidth**, **256–529× faster** than one CPU core and 21–37× faster than 16 at 20–24 qubits; a 28-qubit
@@ -149,7 +153,7 @@ You need LLVM/MLIR 20 (with `clang-20`), CMake, Ninja and `lit`. On Ubuntu, inst
 git clone https://github.com/parhitmtech/NovaQuantum.git && cd NovaQuantum
 cmake -G Ninja -S compiler/mlir -B build/mlir -DMLIR_DIR=/usr/lib/llvm-20/lib/cmake/mlir \
       -DLLVM_EXTERNAL_LIT=$(command -v lit)
-ninja -C build/mlir check-nova                                        # 41 lit tests
+ninja -C build/mlir check-nova                                        # 42 lit tests
 
 build/mlir/bin/nova-compile compiler/mlir/test/Run/tensors.nova -o t && ./t      # Nova to a native executable
 build/mlir/bin/nova-compile compiler/mlir/test/Run/quantum.mlir --qnova-stats -o q && ./q   # a circuit
@@ -176,7 +180,7 @@ coding assistant.
 | **Functions** | Several return values (`int q, int r = divmod(17, 5)`). A function without parameter types is **generic**: compiled once per argument-type combination, as C++ templates are (monomorphization). |
 | **Objects** | Structs, and classes with methods, constructors, inheritance and virtual dispatch; generic classes (`Box<T>`, one compiled copy per `T`). Objects are references, freed by reference counting when nothing refers to them. |
 | **Tensors and ML** | 1–6-dimensional tensors with `+ - * / @`, indexing, slicing and broadcasting; reverse-mode autograd; `novatorch.nn` / `optim` / `data` in the standard library, via `orbit` modules. |
-| **Ways to run** | Compiled to a native executable through MLIR and LLVM (`nova-compile`); interpreted, with a REPL and a step debugger; CUDA source output; GPU training on a SLURM cluster (`sol.finetune`). |
+| **Ways to run** | Compiled to a native executable through MLIR and LLVM (`nova-compile`), or compiled in memory and run at once (`nova-compile --run`, LLVM's JIT); interpreted, with a REPL and a step debugger; in the browser IDE, sandboxed; CUDA source output; GPU training on a SLURM cluster (`sol.finetune`). |
 
 How Nova's semantics differ from Python's, each difference checked against the interpreter: integer division,
 32-bit `int`, block scoping, references, and type errors at compile time. See

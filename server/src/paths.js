@@ -17,6 +17,8 @@ module.exports = {
   // Not derived from NOVA_HOME: a stale global NOVA_HOME must not hide the freshly built binary.
   COMPILER_PATH: fromEnv('NOVA_COMPILER_PATH',
     path.join(REPO_ROOT, 'compiler', 'build', process.platform === 'win32' ? 'nova.exe' : 'nova')),
+  // The native compiler (compiler/mlir), which runs quantum programs and OpenQASM circuits with its JIT
+  NATIVE_COMPILER_PATH: fromEnv('NOVA_NATIVE_PATH', path.join(REPO_ROOT, 'compiler', 'mlir', 'build', 'bin', 'nova-compile')),
   // Built frontend (vite build output) served as the SPA.
   STATIC_DIR: fromEnv('NOVA_STATIC_DIR', path.join(REPO_ROOT, 'frontend', 'dist')),
   PUBLIC_DIR: path.join(SERVER_ROOT, 'public'),

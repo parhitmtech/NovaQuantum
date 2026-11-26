@@ -290,6 +290,33 @@ OpenQASM is the text format quantum toolchains exchange circuits in: Qiskit, CUD
 All 88 comparisons agree. The differences that remain, at most 5 × 10⁻⁵, are Nova printing probabilities to four
 places.
 
+## In the cloud IDE
+
+NovaComp, the browser IDE, runs quantum programs and OpenQASM circuits too. When a program has a `qubit` or a `qpu.`
+gate, or starts with `OPENQASM`, the server runs it through the native compiler instead of the interpreter:
+`nova-compile --run --hardware --qnova-stats`, inside the same sandboxed worker container as every other program
+(no network, read-only, every capability dropped). The output panel shows the probabilities, with the compiled
+circuit's gates, moves and depth and, for a straight-line circuit, its hardware run time.
+
+**Why a JIT.** The sandbox's root filesystem is read-only and its `/tmp` cannot hold executables, so "compile to a
+binary, then run it" would need a writable, executable place and a C compiler in the image. Instead,
+`nova-compile --run` compiles the module to machine code in its own memory, with LLVM's ORC JIT through MLIR's
+`ExecutionEngine`, and calls `main`:
+- the runtime's functions are linked into `nova-compile` itself and exported (`-rdynamic`), so the JIT resolves them
+  in the process;
+- nothing is written to disk, and no `clang` or linker is in the image.
+
+This is decision C5 of [DESIGN.md](DESIGN.md), "run at once through MLIR's ExecutionEngine", now built.
+
+**The image.** The worker image gains `nova-compile`, built in a Docker stage against LLVM/MLIR 20, and `libllvm20`,
+the LLVM shared library it links. Native jobs get 512 MB of memory instead of 256 MB, for the MLIR context and the JIT.
+The CI's worker smoke test runs teleportation and an OpenQASM circuit through the real sandbox. The IDE's example list
+has both (`teleport.nova`, `ghz.qasm`).
+
+`--hardware` in `nova-compile` compiles straight-line circuits down to timed instructions and leaves a circuit with
+control flow (teleportation's corrections) at native gates; the standalone `--qnova-to-atom` pass still reports an
+unscheduled circuit as an error.
+
 ## On the GPU
 
 The simulator also runs on a GPU ([`compiler/mlir/runtime/gpu`](../compiler/mlir/runtime/gpu/README.md)): the same

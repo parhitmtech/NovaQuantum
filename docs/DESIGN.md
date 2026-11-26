@@ -174,7 +174,7 @@ now says what was built. C7–C13 are the decisions made while building it. The 
 | C2. Upstream dialects where they fit | Built: `arith`, `scf`, `func`, `ub`, with `nova` ops for tensors, printing and checks. Arrays, objects and containers are not lowered yet. |
 | C3. Tensors are references | Built as references, with memory effects (C8). They lower to a C runtime (C11), not `linalg` yet. |
 | C4. Reference counting as ops | Not yet: tensors are not freed natively. |
-| C5. Native code through LLVM | Built: `nova-compile` (C12) writes LLVM IR and links with clang. There is no JIT. |
+| C5. Native code through LLVM | Built: `nova-compile` (C12) writes LLVM IR and links with clang, or runs the module at once in LLVM's JIT through MLIR's ExecutionEngine (`--run`), which is how the cloud IDE runs quantum programs. |
 | C6. Autograd as a transformation | Not yet. |
 
 ### C1. Lower from the checked tree, beside today's IR

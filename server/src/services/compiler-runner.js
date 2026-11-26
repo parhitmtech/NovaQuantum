@@ -51,6 +51,19 @@ function validateSource(source) {
   return null;
 }
 
+// ── Native Programs ───────────────────────────────────────────────────────────
+
+// An OpenQASM circuit: its first statement (after any comment lines) is OPENQASM
+function isOpenQASM(source) {
+  return /^\s*(\/\/[^\n]*\n\s*)*OPENQASM\s/.test(source);
+}
+
+// A program the native compiler runs, not the interpreter: an OpenQASM circuit, or Nova code with qubits (a qubit
+// declaration or a qpu.* gate). The interpreter does not run quantum operations; they compile to the qnova dialect.
+function isNativeProgram(source) {
+  return isOpenQASM(source) || /\bqpu\.\w+\s*\(/.test(source) || /^\s*qubit\s+\w+/m.test(source);
+}
+
 // ── Temp File Helpers ─────────────────────────────────────────────────────────
 
 // Per-job temp dirs live under server/_tmp by default (NOVA_TEMP_DIR overrides).
@@ -62,7 +75,7 @@ const activeTempDirs = new Set();
 function writeTempFile(source) {
   const id = crypto.randomUUID();
   const tmpDir  = path.join(LOCAL_TEMP, id);
-  const tmpFile = path.join(tmpDir, 'program.csl');
+  const tmpFile = path.join(tmpDir, isOpenQASM(source) ? 'program.qasm' : 'program.csl');
   fs.mkdirSync(tmpDir, { recursive: true, mode: 0o700 });
   activeTempDirs.add(tmpDir);
   fs.writeFileSync(tmpFile, source + '\n', 'utf8');
@@ -92,7 +105,8 @@ cleanupTimer.unref();
 // ── Run Helper ────────────────────────────────────────────────────────────────
 
 // userId selects the per-user execution quota; omitted, the job counts as internal.
-function runCompiler(tmpFile, extraArgs = [], inputs = "", timeoutMs = MAX_EXECUTION_MS, userId) {
+// native: run it with the native compiler (isNativeProgram)
+function runCompiler(tmpFile, extraArgs = [], inputs = "", timeoutMs = MAX_EXECUTION_MS, userId, native = false) {
   console.log(`\n🚀 runCompiler START`);
   console.log(`   tmpFile: ${tmpFile}`);
   console.log(`   timeout: ${timeoutMs}ms (${timeoutMs/1000}s)`);
@@ -107,7 +121,7 @@ function runCompiler(tmpFile, extraArgs = [], inputs = "", timeoutMs = MAX_EXECU
     const child = spawnCompiler( [tmpFile, ...extraArgs], {
       stdio: ["pipe", "pipe", "pipe"],
       cwd: path.dirname(tmpFile),
-      timeoutMs, userId,
+      timeoutMs, userId, native,
       shell: process.platform === 'win32'
     });
 
@@ -182,5 +196,5 @@ function parseBenchStats(stdout, stderr) {
 
 module.exports = {
   executions, filterStderr, sanitizeSource, validateSource, LOCAL_TEMP,
-  writeTempFile, cleanupTempFile, runCompiler, parseBenchStats,
+  writeTempFile, cleanupTempFile, runCompiler, parseBenchStats, isNativeProgram, isOpenQASM,
 };

@@ -21,7 +21,7 @@ Build the execution image from the repository root:
 docker build --target worker -t novacomp-worker:local .
 ```
 
-Start the backend with `npm start` from `server/`. It finds the compiler at `compiler/build/nova` and the stdlib under `compiler/`; override with `NOVA_COMPILER_PATH` and `NOVA_HOME`. Then start the frontend:
+Start the backend with `npm start` from `server/`. It finds the compiler at `compiler/build/nova` and the stdlib under `compiler/`; override with `NOVA_COMPILER_PATH` and `NOVA_HOME`. Quantum programs and OpenQASM circuits run through the native compiler, by default `compiler/mlir/build/bin/nova-compile` (build it as the README says; `NOVA_NATIVE_PATH` overrides). Then start the frontend:
 
 ```sh
 cd frontend

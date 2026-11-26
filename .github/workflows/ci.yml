@@ -195,7 +195,7 @@ jobs:
     name: Docker images
     needs: [backend, compiler]
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 45  # the worker image builds the native compiler against LLVM/MLIR 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
