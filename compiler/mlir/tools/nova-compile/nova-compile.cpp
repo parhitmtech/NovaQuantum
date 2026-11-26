@@ -42,6 +42,7 @@
 #include "mlir/Dialect/UB/IR/UBOps.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
@@ -55,6 +56,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -81,6 +83,10 @@ int main(int argc, char** argv)
     registry.insert<nova::NovaDialect, qnova::QNovaDialect, atom::AtomDialect, mlir::arith::ArithDialect,
                     mlir::func::FuncDialect, mlir::scf::SCFDialect, mlir::ub::UBDialect>();
     mlir::MLIRContext context(registry);
+    // MLIR's own errors (a circuit that does not import, an op that does not verify) read file:line:col: error: ...,
+    // with the source line, as the front end's do; an editor reads them the same way
+    llvm::SourceMgr sourceMgr;
+    mlir::SourceMgrDiagnosticHandler diagnosticHandler(sourceMgr, &context);
     std::string error;
     mlir::OwningOpRef<mlir::ModuleOp> module;
     if (llvm::StringRef(input).ends_with(".mlir"))
