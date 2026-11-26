@@ -1,18 +1,121 @@
 <div align="center">
 
-<img src="docs/assets/hero.svg" alt="Nova: a statically typed language for machine learning, and NovaComp, the cloud IDE that runs it. The compiler runs source through the lexer, parse tree, check pass, IR and passes, to the interpreter or CUDA." width="100%">
+<img src="docs/assets/novaquantum-hero.svg" alt="NovaQuantum: an SSA-based compiler on MLIR and LLVM. Nova programs go through the front end, the nova dialect in SSA form and the llvm dialect to native executables. Quantum circuits in the qnova dialect are decomposed into neutral-atom native gates, optimized, routed by moving atoms, scheduled into hardware layers, and checked on a statevector simulator." width="100%">
 
-[![CI](https://github.com/parhitmtech/Nova/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/parhitmtech/Nova/actions/workflows/ci.yml)
+[![CI](https://github.com/parhitmtech/NovaQuantum/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/parhitmtech/NovaQuantum/actions/workflows/ci.yml)
 ![C++17](https://img.shields.io/badge/compiler-C%2B%2B17-a5a2ff?style=flat-square)
-![Node 22](https://img.shields.io/badge/backend-Node%2022-76dac4?style=flat-square)
-![React](https://img.shields.io/badge/IDE-React%20%2B%20Monaco-7cb8f2?style=flat-square)
+![MLIR and LLVM 20](https://img.shields.io/badge/MLIR%20%C2%B7%20LLVM-20-f2c879?style=flat-square)
+![Neutral atoms](https://img.shields.io/badge/quantum-neutral%20atoms-76dac4?style=flat-square)
 ![CUDA and Triton](https://img.shields.io/badge/GPU-CUDA%20%C2%B7%20Triton-f5a6b1?style=flat-square)
-![MLIR](https://img.shields.io/badge/next-MLIR%20dialect-f2c879?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-lit%20%C2%B7%20differential-7cb8f2?style=flat-square)
 
-**[Showcase](docs/showcase/index.html)** · [Quick start](#-quick-start) · [Architecture](#-architecture) ·
-[Performance](#-performance) · [Roadmap](#-roadmap) · [Docs](#-documentation)
+[Native code](#-nova-to-native-code-through-mlir-and-llvm) · [Quantum](#%EF%B8%8F-quantum-circuits-for-neutral-atom-hardware) ·
+[Try it](#%EF%B8%8F-try-it) · [The Nova language](#-the-nova-language) · [Design: quantum](docs/QUANTUM.md) ·
+[Roadmap](docs/ROADMAP.md)
 
 </div>
+
+**NovaQuantum** is an SSA-based compiler built from scratch in C++ on MLIR and LLVM. It compiles in two
+directions:
+
+- **Nova programs to native code.** Nova is a statically typed, Python-like language for machine learning. Its
+  programs lower to MLIR in SSA form, through a custom tensor dialect, and through LLVM to native executables. In
+  CI, every compiled program must behave exactly as the interpreter does.
+- **Quantum circuits to neutral-atom hardware.** `qnova`, a second dialect, treats qubits as SSA values. Circuits
+  are decomposed into the machine's native gates and optimized. They are routed by **moving atoms** and scheduled
+  into the parallel layers the hardware runs. A statevector simulator checks every compiled circuit against the
+  original.
+
+It grows out of [Nova](https://github.com/parhitmtech/Nova), whose full history it carries: the language, its
+interpreter, the CUDA and Triton matmul kernels, and the NovaComp cloud IDE are all here too.
+
+## 🧩 Nova to native code, through MLIR and LLVM
+
+```
+prog.nova ─▶ front end ─▶ nova + scf + arith + func (SSA) ─▶ runtime calls ─▶ llvm dialect ─▶ LLVM IR ─▶ executable
+             types,       ifs' results as phis, loops'        dialect           MLIR's own       clang -O2
+             generics     variables as block arguments        conversion        conversions      + C runtime
+```
+
+- **SSA construction from a checked tree:**
+  - each variable maps to the SSA value it holds;
+  - `scf.if` results act as phis, and `scf.while` block arguments carry loop variables;
+  - `break`, `continue` and `return` become flags, since structured regions have no jumps;
+  - generic functions become one `func.func` per instantiation (monomorphization).
+- **A tensor dialect in TableGen.** Each op declares per-value memory effects (`MemAlloc`, `MemRead`, `MemWrite`)
+  and a `runtime_error` effect when it can fail, so upstream CSE, LICM and canonicalize optimize it without breaking
+  observable behavior.
+- **Dialect conversion to LLVM.** A type converter maps tensors to `!llvm.ptr` through signatures, calls and `scf`,
+  with one pattern per op. `nova-compile` runs all of it in one process, so runtime errors cite the Nova source line.
+- **Differential testing in CI.** Every program runs natively and interpreted, and stdout, stderr and exit status
+  must match. All 28 programs that compile natively match. It found two real bugs:
+  - the interpreter printed a tensor's handle instead of its elements;
+  - integer division by zero was undefined behavior in LLVM. It is now an explicit check op, which canonicalize
+    removes when the divisor is a nonzero constant.
+
+| Benchmark | Interpreter | Nova native | Speedup | Same in C, clang -O2 |
+|---|---|---|---|---|
+| `calls` (naive fib(30), 1.3M calls) | 633 ms | 2.9 ms | **215×** | 2.5 ms |
+| `int_loop` (3M iterations) | 159 ms | 1.0 ms | **157×** | 2.1 ms (64-bit ints) |
+| `fibonacci` (fib(35)) | 53 ms | 26 ms | 2.1× | 34 ms |
+
+Median of 7 runs, process start included (`compiler/mlir/utils/benchmark.py`). The interpreter memoizes pure
+functions automatically, so for fib(35) it skips most of the 30M calls that native code makes.
+
+## ⚛️ Quantum circuits for neutral-atom hardware
+
+```mlir
+%a = qnova.alloc
+%b = qnova.alloc
+%a1 = qnova.h %a                 // each gate consumes its qubits and gives new values:
+%a2, %b1 = qnova.cx %a1, %b      // def-use chains are the circuit's wires
+qnova.probs %a2, %b1             // |00>: 0.5000   |11>: 0.5000
+```
+
+- **Qubits are SSA values.** A `LinearQubits` op trait makes **no-cloning** part of the verifier: each qubit value is
+  used at most once.
+- **Native gates of a neutral-atom machine.** `--qnova-decompose` rewrites logical gates (`h`, `cx`, `cp`, `swap`, …)
+  into Raman rotations (`r(θ, φ)`, `rz`) and the Rydberg `cz`.
+- **Optimization on SSA def-use.** Self-inverse gates cancel, rotations merge, and diagonal gates commute through
+  `cz`. Gates that are unobservable are dropped: diagonal gates on fresh qubits or before readout, and gates on
+  qubits never measured (justified by the no-signaling theorem).
+- **Hardware-aware scheduling.** Atoms are placed on a grid. Routing **moves atoms** with optical tweezers instead of
+  inserting SWAP gates. Operations are packed into Raman, Rydberg and move layers, with parallel `cz` gates kept
+  apart by the blockade radius.
+- **Checked on a simulator.** The runtime's statevector simulator runs each circuit as written and as compiled, and
+  CI requires identical probabilities.
+
+| Circuit | Qubits | Native gates | Compiled | Saved | Moves | Depth | Compiled = logical |
+|---|---|---|---|---|---|---|---|
+| GHZ | 12 | 57 | 45 | 21% | 7 | 25 | ✓ |
+| QFT, then its inverse | 8 | 764 | 4 | **99%** | 0 | 1 | ✓ |
+| random, 120 gates | 8 | 483 | 355 | **27%** | 26 | 242 | ✓ |
+| random, 300 gates | 12 | 1026 | 867 | 15% | 72 | 473 | ✓ |
+
+The design, with the physics behind each rewrite, is in **[docs/QUANTUM.md](docs/QUANTUM.md)**.
+
+## 🛠️ Try it
+
+You need LLVM/MLIR 20 (with `clang-20`), CMake, Ninja and `lit`. On Ubuntu, install them from apt.llvm.org.
+
+```bash
+git clone https://github.com/parhitmtech/NovaQuantum.git && cd NovaQuantum
+cmake -G Ninja -S compiler/mlir -B build/mlir -DMLIR_DIR=/usr/lib/llvm-20/lib/cmake/mlir \
+      -DLLVM_EXTERNAL_LIT=$(command -v lit)
+ninja -C build/mlir check-nova                                        # 28 lit tests
+
+build/mlir/bin/nova-compile compiler/mlir/test/Run/tensors.nova -o t && ./t      # Nova to a native executable
+build/mlir/bin/nova-compile compiler/mlir/test/Run/quantum.mlir --qnova-stats -o q && ./q   # a circuit
+build/mlir/bin/nova-opt compiler/mlir/test/Run/quantum.mlir --qnova-to-native     # see the compiled circuit
+
+make -C compiler                                                      # the interpreter, for the checks below
+python3 compiler/mlir/utils/difftest.py --build build/mlir --interpreter compiler/build/nova compiler/tests
+python3 compiler/mlir/utils/qbench.py --build build/mlir              # the quantum table above
+python3 compiler/mlir/utils/benchmark.py --build build/mlir --interpreter compiler/build/nova \
+        compiler/benchmarks/compare/*.nova                            # the native-code table above
+```
+
+## 📜 The Nova language
 
 **Nova** is a statically typed programming language for machine learning, with Python-style layout and
 tensors, autograd and GPU-cluster training built into the language. **NovaComp** is the cloud IDE around
@@ -20,8 +123,7 @@ it: a browser editor that compiles and runs Nova in sandboxed containers, stream
 includes an AI coding assistant.
 
 > **Interactive showcase:** [`docs/showcase/index.html`](docs/showcase/index.html) is a single-file page with a
-> live compiler walkthrough, a clickable architecture map and the benchmark charts. Open it in a browser, or
-> serve it with GitHub Pages (Settings → Pages → `main` / `docs`) at `https://parhitmtech.github.io/Nova/showcase/`.
+> live compiler walkthrough, a clickable architecture map and the benchmark charts.
 
 ```python
 orbit novatorch.nn
@@ -41,58 +143,6 @@ ignite:                           # the entry point
     print(tensor_grad(W).rows)    # 3
 
     print(scale(1.5, 2.0))        # 3.000000
-```
-
-## ⚛️ NovaQuantum: an SSA compiler through MLIR to native code, and to neutral-atom hardware
-
-This repository extends Nova with an MLIR back end, built in C++ on LLVM/MLIR 20.
-
-**Nova to native code.**
-- The checked tree lowers to MLIR in SSA form:
-  - `scf.if` results act as phis, and `scf.while` block arguments carry loop variables;
-  - `break`, `continue` and `return` become flags;
-  - generic functions become one `func.func` per instantiation;
-  - tensors become a custom `nova` dialect, whose ops declare per-value memory effects so MLIR's CSE, LICM and
-    canonicalize optimize it safely.
-- A dialect-conversion pass lowers it through `llvm` to a native executable: `nova-compile prog.nova -o prog`.
-- **Differential testing** runs every program both natively and in the interpreter in CI. All 28 programs that
-  compile natively match the interpreter on stdout, stderr and exit status. It found two real bugs: a tensor
-  `print` that printed a handle, and integer division by zero, which is undefined behavior in LLVM.
-- **Native code is 2–215× faster than the interpreter,** and on par with the same program written in C and compiled
-  by the same clang. Median of 7 runs, process start included (`compiler/mlir/utils/benchmark.py`):
-
-| Benchmark | Interpreter | Nova native | Speedup | Same in C, clang -O2 |
-|---|---|---|---|---|
-| `calls` (naive fib(30), 1.3M calls) | 633 ms | 2.9 ms | 215× | 2.5 ms |
-| `int_loop` (3M iterations) | 159 ms | 1.0 ms | 157× | 2.1 ms (64-bit ints) |
-| `fibonacci` (fib(35)) | 53 ms | 26 ms | 2.1× | 34 ms |
-
-  The interpreter memoizes pure functions automatically, so for fib(35) it skips most of the 30M calls that
-  native code makes.
-
-**Quantum circuits for a neutral-atom machine ([docs/QUANTUM.md](docs/QUANTUM.md)).** A second dialect, `qnova`:
-- Qubits are SSA values. A linearity trait enforces no-cloning in the verifier.
-- Logical gates decompose into the native Raman (`r`, `rz`) and Rydberg (`cz`) gates.
-- Canonicalization cancels and merges gates using SSA def-use: self-inverse pairs, rotation merging, diagonal gates
-  commuting through `cz`, and unobservable diagonal gates dropped.
-- A scheduler places atoms on a grid, routes by **moving atoms** instead of inserting SWAPs, and packs gates into
-  hardware layers under a Rydberg-blockade spacing rule.
-- A statevector simulator in the runtime runs each circuit as written and as compiled, and CI requires identical
-  probabilities.
-
-| Circuit | Qubits | Native gates | Compiled | Saved | Moves | Depth | Compiled = logical |
-|---|---|---|---|---|---|---|---|
-| GHZ | 12 | 57 | 45 | 21% | 7 | 25 | ✓ |
-| QFT, then its inverse | 8 | 764 | 4 | 99% | 0 | 1 | ✓ |
-| random, 120 gates | 8 | 483 | 355 | 27% | 26 | 242 | ✓ |
-| random, 300 gates | 12 | 1026 | 867 | 15% | 72 | 473 | ✓ |
-
-```bash
-cmake -G Ninja -S compiler/mlir -B build/mlir -DMLIR_DIR=/usr/lib/llvm-20/lib/cmake/mlir
-ninja -C build/mlir check-nova                                   # 28 lit tests
-build/mlir/bin/nova-compile compiler/mlir/test/Run/tensors.nova -o t   # Nova to a native executable
-python3 compiler/mlir/utils/qbench.py --build build/mlir         # the quantum table above
-python3 compiler/mlir/utils/difftest.py --build build/mlir --interpreter compiler/build/nova compiler/tests
 ```
 
 ## 💡 Why Nova
@@ -144,7 +194,7 @@ Write in the browser, run in a sandbox, train on ASU's SOL A100s with `sol.finet
 You need `make`, a C++17 compiler (g++ or clang++) and Node.js 22.12+.
 
 ```bash
-git clone https://github.com/parhitmtech/Nova.git && cd Nova
+git clone https://github.com/parhitmtech/NovaQuantum.git && cd NovaQuantum
 make -C compiler                      # builds compiler/build/nova
 make -C compiler test                 # the golden language tests
 
@@ -395,12 +445,13 @@ The full plan is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 | Doc | For |
 |---|---|
+| [docs/QUANTUM.md](docs/QUANTUM.md) | Compiling quantum circuits for a neutral-atom machine: the qnova dialect, its passes, the physics behind each rewrite |
 | [docs/SYNTAX.md](docs/SYNTAX.md) | The Nova language |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the IDE, backend, sandbox, NovaBot, SOL and compiler fit together |
 | [docs/SETUP.md](docs/SETUP.md) | Running and testing everything locally |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | Production deployment on EC2 |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | What comes next |
-| [docs/DESIGN.md](docs/DESIGN.md) | The compiler's design decisions, with the alternatives and trade-offs |
+| [docs/DESIGN.md](docs/DESIGN.md) | The compiler's design decisions, with the alternatives and trade-offs (C: the MLIR back end) |
 | [compiler/kernels/README.md](compiler/kernels/README.md) | The GPU matmul kernels and their A100 results |
 | [compiler/kernels/triton/IR_WALKTHROUGH.md](compiler/kernels/triton/IR_WALKTHROUGH.md) | Triton's compilation of the matmul, stage by stage |
 | [docs/BENCHMARKS.md](docs/BENCHMARKS.md) | Performance numbers, method, and the issues they found |
@@ -410,6 +461,9 @@ The full plan is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ```
 compiler/    the Nova language: C++17 compiler, runtime, stdlib, tests, benchmarks, GPU kernels (kernels/)
+  mlir/      the MLIR back end: the nova and qnova dialects (include/, lib/), nova-lower, nova-opt and
+             nova-compile (tools/), the C runtime and quantum simulator (runtime/), lit tests (test/), and
+             difftest.py, benchmark.py and qbench.py (utils/)
 server/      Node.js + Express backend: auth, execution, workspace, NovaBot
 frontend/    React + Vite IDE
 examples/    Nova example programs

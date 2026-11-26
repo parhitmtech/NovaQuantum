@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="t d">
+<title id="t">NovaQuantum</title>
+<desc id="d">An SSA-based MLIR compiler. Nova programs go through the front end, the nova dialect in SSA form and the llvm dialect to native executables, 2 to 215 times faster than the interpreter and checked against it in CI. Quantum circuits in the qnova dialect are decomposed into neutral-atom native gates, optimized, routed by moving atoms, scheduled into hardware layers, and checked on a statevector simulator.</desc>
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Helvetica, Arial, sans-serif; fill: #e6eaf2; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace; }
+  .word { font-size: 56px; font-weight: 800; letter-spacing: -1.5px; }
+  .tag { font-size: 18px; fill: #99a6be; }
+  .row { font-size: 12px; font-weight: 700; letter-spacing: 1.5px; }
+  .stage { font-size: 13px; font-weight: 600; }
+  .note { font-size: 11px; fill: #99a6be; }
+  .result { font-size: 12px; font-weight: 600; }
+  .pulse { animation: flow 5s linear infinite; }
+  .pulse2 { animation: flow 5s linear 2.5s infinite; }
+  @keyframes flow { 0% { offset-distance: 0%; opacity: 0; } 6% { opacity: 1; } 94% { opacity: 1; }
+                    100% { offset-distance: 100%; opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+</style>
+<rect x="0.5" y="0.5" width="1199" height="419" rx="14" fill="#0c101b" stroke="#242e43"/>
+
+<text x="48" y="84" class="word">Nova<tspan fill="#a5a2ff">Quantum</tspan></text>
+<text x="50" y="118" class="tag">An SSA-based compiler on MLIR and LLVM: a Python-like DSL to native code, and quantum circuits to neutral-atom hardware</text>
+
+<!-- Row 1: native code -->
+<text x="50" y="172" class="row" fill="#76dac4" style="fill:#76dac4">NOVA PROGRAMS → NATIVE CODE</text>
+<path id="r1" d="M 140 214 H 1010" stroke="#242e43" stroke-width="2" fill="none"/>
+<g>
+  <rect x="50" y="190" width="160" height="48" rx="9" fill="#111725" stroke="#76dac4"/>
+  <text x="130" y="211" class="stage" text-anchor="middle">Nova source</text>
+  <text x="130" y="228" class="note mono" text-anchor="middle">.nova</text>
+  <rect x="240" y="190" width="170" height="48" rx="9" fill="#111725" stroke="#76dac4"/>
+  <text x="325" y="211" class="stage" text-anchor="middle">front end</text>
+  <text x="325" y="228" class="note" text-anchor="middle">types, generics</text>
+  <rect x="440" y="190" width="190" height="48" rx="9" fill="#111725" stroke="#76dac4"/>
+  <text x="535" y="211" class="stage" text-anchor="middle">nova dialect · SSA</text>
+  <text x="535" y="228" class="note" text-anchor="middle">scf, arith, func, effects</text>
+  <rect x="660" y="190" width="170" height="48" rx="9" fill="#111725" stroke="#76dac4"/>
+  <text x="745" y="211" class="stage" text-anchor="middle">llvm dialect</text>
+  <text x="745" y="228" class="note" text-anchor="middle">dialect conversion</text>
+  <rect x="860" y="190" width="150" height="48" rx="9" fill="#111725" stroke="#76dac4"/>
+  <text x="935" y="211" class="stage" text-anchor="middle">native binary</text>
+  <text x="935" y="228" class="note" text-anchor="middle">clang + C runtime</text>
+</g>
+<circle r="4" fill="#76dac4" class="pulse" style="offset-path: path('M 210 214 H 860')"/>
+<text x="1030" y="208" class="result" style="fill:#76dac4">2–215× faster</text>
+<text x="1030" y="226" class="note">output = interpreter's</text>
+
+<!-- Row 2: quantum -->
+<text x="50" y="292" class="row" style="fill:#a5a2ff">QUANTUM CIRCUITS → NEUTRAL-ATOM HARDWARE</text>
+<g>
+  <rect x="50" y="310" width="140" height="48" rx="9" fill="#111725" stroke="#a5a2ff"/>
+  <text x="120" y="331" class="stage" text-anchor="middle">qnova circuit</text>
+  <text x="120" y="348" class="note" text-anchor="middle">qubits as SSA values</text>
+  <rect x="210" y="310" width="150" height="48" rx="9" fill="#111725" stroke="#a5a2ff"/>
+  <text x="285" y="331" class="stage" text-anchor="middle">decompose</text>
+  <text x="285" y="348" class="note mono" text-anchor="middle">r · rz · cz</text>
+  <rect x="380" y="310" width="150" height="48" rx="9" fill="#111725" stroke="#a5a2ff"/>
+  <text x="455" y="331" class="stage" text-anchor="middle">optimize</text>
+  <text x="455" y="348" class="note" text-anchor="middle">15–27% fewer gates</text>
+  <rect x="550" y="310" width="150" height="48" rx="9" fill="#111725" stroke="#a5a2ff"/>
+  <text x="625" y="331" class="stage" text-anchor="middle">route</text>
+  <text x="625" y="348" class="note" text-anchor="middle">move atoms, not SWAPs</text>
+  <rect x="720" y="310" width="150" height="48" rx="9" fill="#111725" stroke="#a5a2ff"/>
+  <text x="795" y="331" class="stage" text-anchor="middle">schedule</text>
+  <text x="795" y="348" class="note" text-anchor="middle">layers, blockade</text>
+  <rect x="890" y="310" width="120" height="48" rx="9" fill="#111725" stroke="#a5a2ff"/>
+  <text x="950" y="331" class="stage" text-anchor="middle">simulator</text>
+  <text x="950" y="348" class="note" text-anchor="middle">statevector</text>
+</g>
+<circle r="4" fill="#a5a2ff" class="pulse2" style="offset-path: path('M 190 334 H 890')"/>
+<text x="1030" y="328" class="result" style="fill:#a5a2ff">same probabilities</text>
+<text x="1030" y="346" class="note">compiled vs logical, in CI</text>
+
+<text x="50" y="396" class="note mono">C++17 · MLIR / LLVM 20 · TableGen ODS · lit / FileCheck · differential testing</text>
+</svg>
