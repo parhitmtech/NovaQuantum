@@ -12,6 +12,7 @@ add_mlir_library(NovaConversion
     LINK_LIBS PUBLIC
     MLIRNova
     MLIRQNova
+    MLIRAtom
     MLIRArithDialect
     MLIRFuncDialect
     MLIRSCFDialect

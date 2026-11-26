@@ -158,3 +158,61 @@ void nova_q_probs(int32_t n, int32_t q0, int32_t q1, int32_t q2, int32_t q3, int
         printf(">: %.4f\n", probs[k]);
     }
 }
+
+// ─── Hardware instructions (the atom dialect), on the same simulator ─────────
+//
+// A compiled program's instructions name sites of the atom array, not qubits. The simulator keeps which qubit's atom
+// is at each site: a load puts a new one there, a move carries it to another site, and each instruction acts on the
+// qubit at its site. So the hardware program runs on the same statevector as the circuit, and its probabilities can
+// be checked against the circuit's.
+
+#define GRID 64
+
+static int32_t at_site[GRID][GRID];  // the qubit at each site, plus one (0: no atom)
+
+static int32_t atom_at(int32_t x, int32_t y)
+{
+    if (x < 0 || y < 0 || x >= GRID || y >= GRID || !at_site[x][y])
+    {
+        char message[64];
+        snprintf(message, sizeof message, "no atom at site (%d, %d)", x, y);
+        fail(message);
+    }
+    return at_site[x][y] - 1;
+}
+
+void nova_hw_load(int32_t x, int32_t y)
+{
+    if (x < 0 || y < 0 || x >= GRID || y >= GRID || at_site[x][y]) fail("an atom loaded where there is one");
+    at_site[x][y] = nova_q_alloc() + 1;
+}
+
+void nova_hw_raman(int32_t x, int32_t y, double theta, double phi) { nova_q_r(atom_at(x, y), theta, phi); }
+
+void nova_hw_shift(int32_t x, int32_t y, double theta) { nova_q_rz(atom_at(x, y), theta); }
+
+// One pair of a global Rydberg pulse: the two atoms' cz
+void nova_hw_rydberg(int32_t x0, int32_t y0, int32_t x1, int32_t y1) { nova_q_cz(atom_at(x0, y0), atom_at(x1, y1)); }
+
+void nova_hw_move(int32_t x0, int32_t y0, int32_t x1, int32_t y1)
+{
+    int32_t q = atom_at(x0, y0);
+    if (x1 < 0 || y1 < 0 || x1 >= GRID || y1 >= GRID || at_site[x1][y1]) fail("an atom moved onto another");
+    at_site[x0][y0] = 0;
+    at_site[x1][y1] = q + 1;
+}
+
+int32_t nova_hw_measure(int32_t x, int32_t y) { return nova_q_measure(atom_at(x, y)); }
+
+// The probabilities of the atoms at n sites (x, y pairs), as nova_q_probs prints them
+void nova_hw_readout(int32_t n, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t x3,
+                     int32_t y3, int32_t x4, int32_t y4, int32_t x5, int32_t y5, int32_t x6, int32_t y6, int32_t x7,
+                     int32_t y7, int32_t x8, int32_t y8, int32_t x9, int32_t y9, int32_t x10, int32_t y10, int32_t x11,
+                     int32_t y11)
+{
+    int32_t xy[24] = {x0, y0, x1, y1, x2, y2, x3, y3, x4,  y4,  x5,  y5,
+                      x6, y6, x7, y7, x8, y8, x9, y9, x10, y10, x11, y11};
+    int32_t q[12] = {0};
+    for (int32_t k = 0; k < n; k++) q[k] = atom_at(xy[2 * k], xy[2 * k + 1]);
+    nova_q_probs(n, q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7], q[8], q[9], q[10], q[11]);
+}

@@ -13,17 +13,20 @@
 #include "Nova/Passes.h"
 #include "QNova/QNovaDialect.h"
 #include "QNova/QNovaPasses.h"
+#include "Atom/AtomDialect.h"
+#include "Atom/AtomPasses.h"
 
 int main(int argc, char** argv)
 {
     mlir::registerTransformsPasses();  // the general passes: canonicalize, cse, loop-invariant code motion, ...
     nova::registerPasses();            // Nova's lowering toward LLVM
     qnova::registerPasses();           // compiling circuits for a neutral-atom machine
+    atom::registerPasses();            // ... down to its timed hardware instructions
 
     // The dialects a .mlir file may use: nova, and the upstream ones Nova lowers to (docs/DESIGN.md, C2)
     mlir::DialectRegistry registry;
     registry.insert<nova::NovaDialect, mlir::arith::ArithDialect, mlir::func::FuncDialect, mlir::scf::SCFDialect,
-                    mlir::ub::UBDialect, qnova::QNovaDialect>();
+                    mlir::ub::UBDialect, qnova::QNovaDialect, atom::AtomDialect>();
 
     return mlir::asMainReturnCode(mlir::MlirOptMain(argc, argv, "Nova's MLIR driver\n", registry));
 }

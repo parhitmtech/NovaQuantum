@@ -20,6 +20,7 @@
 
 #include "Nova/NovaOps.h"
 #include "QNova/QNovaOps.h"
+#include "Atom/AtomOps.h"
 #include "mlir/Conversion/Passes.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -333,6 +334,80 @@ struct ProbsLowering : mlir::OpConversionPattern<qnova::ProbsOp>
     }
 };
 
+// ─── atom: a neutral-atom machine's instructions, run by site on the same simulator ───
+
+// The site and angles of an instruction as constants, its arguments in the runtime's order
+llvm::SmallVector<mlir::Value> coordinates(mlir::PatternRewriter& rewriter, mlir::Location loc,
+                                           llvm::ArrayRef<int64_t> xy)
+{
+    llvm::SmallVector<mlir::Value> args;
+    for (int64_t v : xy) args.push_back(i32(rewriter, loc, int32_t(v)));
+    return args;
+}
+
+mlir::Value f64(mlir::PatternRewriter& rewriter, mlir::Location loc, double v)
+{
+    return rewriter.create<mlir::arith::ConstantOp>(loc, rewriter.getF64FloatAttr(v));
+}
+
+// atom.load [x, y] is func.call @nova_hw_load(x, y); atom.raman, atom.shift and atom.move likewise, by site
+struct AtomLowering : mlir::RewritePattern
+{
+    AtomLowering(mlir::MLIRContext* context) : RewritePattern(MatchAnyOpTypeTag(), 1, context) {}
+
+    mlir::LogicalResult matchAndRewrite(mlir::Operation* op, mlir::PatternRewriter& rewriter) const override
+    {
+        mlir::Location loc = op->getLoc();
+        if (auto load = llvm::dyn_cast<atom::LoadOp>(op))
+            call_runtime(rewriter, op, "nova_hw_load", {}, coordinates(rewriter, loc, load.getSite()));
+        else if (auto raman = llvm::dyn_cast<atom::RamanOp>(op))
+        {
+            auto args = coordinates(rewriter, loc, raman.getSite());
+            args.push_back(f64(rewriter, loc, raman.getTheta().convertToDouble()));
+            args.push_back(f64(rewriter, loc, raman.getPhi().convertToDouble()));
+            call_runtime(rewriter, op, "nova_hw_raman", {}, args);
+        }
+        else if (auto shift = llvm::dyn_cast<atom::ShiftOp>(op))
+        {
+            auto args = coordinates(rewriter, loc, shift.getSite());
+            args.push_back(f64(rewriter, loc, shift.getTheta().convertToDouble()));
+            call_runtime(rewriter, op, "nova_hw_shift", {}, args);
+        }
+        else if (auto rydberg = llvm::dyn_cast<atom::RydbergOp>(op))  // one pulse: a cz on each of its pairs
+        {
+            llvm::ArrayRef<int64_t> p = rydberg.getPairs();
+            for (size_t k = 0; k + 3 < p.size(); k += 4)
+                call_runtime(rewriter, op, "nova_hw_rydberg", {}, coordinates(rewriter, loc, p.slice(k, 4)));
+        }
+        else if (auto move = llvm::dyn_cast<atom::MoveOp>(op))
+        {
+            auto args = coordinates(rewriter, loc, move.getFrom());
+            args.append(coordinates(rewriter, loc, move.getTo()));
+            call_runtime(rewriter, op, "nova_hw_move", {}, args);
+        }
+        else if (auto measure = llvm::dyn_cast<atom::MeasureOp>(op))
+        {
+            mlir::Value outcome = call_runtime(rewriter, op, "nova_hw_measure", rewriter.getI32Type(),
+                                               coordinates(rewriter, loc, measure.getSite()))
+                                      .getResult(0);
+            rewriter.replaceOp(op, rewriter.create<mlir::arith::TruncIOp>(loc, rewriter.getI1Type(), outcome));
+            return mlir::success();
+        }
+        else if (auto readout = llvm::dyn_cast<atom::ReadoutOp>(op))  // how many sites, then 12 (x, y) pairs
+        {
+            llvm::ArrayRef<int64_t> s = readout.getSites();
+            llvm::SmallVector<mlir::Value> args{i32(rewriter, loc, int32_t(s.size() / 2))};
+            args.append(coordinates(rewriter, loc, s));
+            while (args.size() < 25) args.push_back(i32(rewriter, loc, 0));
+            call_runtime(rewriter, op, "nova_hw_readout", {}, args);
+        }
+        else
+            return mlir::failure();
+        rewriter.eraseOp(op);
+        return mlir::success();
+    }
+};
+
 // Nova's @main returns nothing; C's main returns an int, the program's exit status. So @main returns 0, from each
 // of its returns. (Not a conversion pattern: it changes a function's type, not an op of the nova dialect.)
 void make_entry(mlir::ModuleOp m)
@@ -381,7 +456,7 @@ struct ConvertNovaToRuntime : mlir::PassWrapper<ConvertNovaToRuntime, mlir::Oper
         });
 
         mlir::ConversionTarget target(*context);
-        target.addIllegalDialect<nova::NovaDialect, qnova::QNovaDialect>();  // every nova and qnova op must go
+        target.addIllegalDialect<nova::NovaDialect, qnova::QNovaDialect, atom::AtomDialect>();  // all must go
         target.addLegalDialect<mlir::arith::ArithDialect, mlir::func::FuncDialect, mlir::scf::SCFDialect,
                                mlir::ub::UBDialect, mlir::LLVM::LLVMDialect>();
         // ... and no tensor type may remain: an op is legal only once its types are converted
@@ -405,6 +480,7 @@ struct ConvertNovaToRuntime : mlir::PassWrapper<ConvertNovaToRuntime, mlir::Oper
         patterns.add<ScalarLowering<nova::AddScalarOp>>(converter, context, "nova_add_scalar");
         // qnova: each gate a call to the simulator, by name
         patterns.add<AllocLowering, MoveLowering, MeasureLowering, ProbsLowering>(converter, context);
+        patterns.add<AtomLowering>(context);  // the hardware instructions, by site
         patterns.add<GateLowering<qnova::HOp>>(converter, context, "nova_q_h");
         patterns.add<GateLowering<qnova::XOp>>(converter, context, "nova_q_x");
         patterns.add<GateLowering<qnova::YOp>>(converter, context, "nova_q_y");

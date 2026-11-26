@@ -15,8 +15,9 @@ circuit.mlir (logical: h, cx, cp, swap, rx, ...)
   │  --qnova-decompose     every gate as native r(θ, φ), rz(θ), cz
   │  canonicalize          cancel and merge native gates; drop unobservable ones
   │  --qnova-schedule      place atoms, insert moves, assign hardware layers
+  │  --qnova-to-atom       timed hardware instructions on sites (the atom dialect), with nova-compile --hardware
   ▼
-native circuit  ──--convert-nova-to-runtime──▶  calls into the simulator  ──LLVM──▶  executable
+native circuit or hardware program  ──--convert-nova-to-runtime──▶  simulator calls  ──LLVM──▶  executable
 ```
 
 `nova-compile circuit.mlir -o circuit` runs all of it; `--logical` skips the compilation, so the circuit runs as
@@ -178,6 +179,54 @@ Each op gets `{layer = n}`, and the function gets `qnova.depth`, `qnova.moves` a
 deliberately simple: one move per `cz` with no moving back, and no limit on parallel moves. This pass is where a
 richer machine description would plug in.
 
+## The hardware layer: timed instructions, the `atom` dialect
+
+Below the native gates is a third dialect, `atom`: the machine's instructions, with their times. `--qnova-to-atom`
+writes a scheduled circuit as instructions:
+
+```mlir
+atom.load [0, 0]                                                  // an atom at a site, in |0>
+atom.raman [0, 0] theta 1.5707963267948966 phi 1.5707963267948966 at 0 for 500   // a local Raman pulse
+atom.shift [1, 1] theta 3.1415926535897931 at 500 for 500         // a phase shift (rz)
+atom.move [0, 2] to [0, 1] at 1000 for 25000                      // a tweezer move
+atom.rydberg [0, 0, 1, 0, 1, 1, 2, 1] at 26000 for 400            // ONE global pulse: a cz on every listed pair
+atom.readout [0, 0, 1, 0, 1, 1, 0, 1] at 26400 for 1000000
+```
+
+How it differs from the layer above:
+- **No qubit values.** An instruction names a site, as the hardware does. The pass follows each SSA qubit value to its
+  atom's site: its alloc's site, then each move's.
+- **Times instead of order.** Every instruction carries `start` and `duration` in nanoseconds. Layers run one after
+  another, each as long as its longest instruction.
+- **The Rydberg pulse is global.** A layer's `cz` gates become *one* `atom.rydberg` naming all their pairs, which is
+  how the hardware drives them. The verifier checks that each pair is neighbouring atoms.
+
+The timing model's parameters are options of the pass. The defaults are illustrative orders of magnitude, not one
+machine's numbers:
+
+| Parameter | Default |
+|---|---|
+| `raman-pi-ns` | 1,000 ns per π of rotation |
+| `shift-pi-ns` | 500 ns per π |
+| `rydberg-ns` | 400 ns |
+| `move-site-ns`, `move-overhead-ns` | 10,000 ns per site of travel, plus 15,000 ns to pick up and drop |
+| `measure-ns` | 1,000,000 ns |
+
+`--atom-timing` prints a program's run time by kind of instruction, and `nova-compile --hardware` compiles a circuit
+all the way down to these instructions.
+
+**The simulator runs the hardware program too, by site.** It keeps which qubit's atom sits at each site: a load puts
+one there, a move carries it, and each pulse acts on the atom at its site. So the lowest layer is checked the same
+way as the others: the hardware program must give the logical circuit's probabilities.
+
+**That check found a scheduler bug.** Routing chooses each move's destination in program order, when the site is
+free because another atom has already left it. The scheduler then packs ops into the earliest layer their SSA
+dependences allow. Two moves of different atoms have no SSA dependence on each other, so the move *into* a site
+could land in an earlier layer than the move *out* of it, and on the hardware the two atoms would collide. The gate
+level couldn't see this, because qubit values carry no sites. Running the timed instructions by site stopped with
+"an atom moved onto another". The fix is a resource dependence on sites: a move to a site now waits for the layer
+after the move that vacated it.
+
 ## Running circuits, and checking the compiler
 
 `--convert-nova-to-runtime`, the same pass that lowers Nova's tensors, lowers `qnova` too:
@@ -187,24 +236,28 @@ richer machine description would plug in.
 - a move becomes nothing, since moving an atom doesn't change its state.
 
 `runtime/nova_quantum.c` is a statevector simulator for up to 24 qubits. It runs the logical gates and the native ones
-alike, which makes **differential testing** possible. `utils/qbench.py` takes each benchmark circuit, compiles it once
-as written and once for the machine, runs both, and requires identical probability distributions (to four places).
-CI runs it on every push.
+alike, as well as the hardware instructions by site, which makes **differential testing** possible.
+`utils/qbench.py` runs each benchmark circuit three ways: as written, compiled to native gates, and compiled to
+hardware instructions. It requires the second and third to give the first's probability distribution, to four
+places. CI runs it on every push.
 
-| Circuit | Qubits | Logical gates | Native (decomposed) | Compiled | Saved | cz | Moves | Depth (layers) | Compiled = logical |
-|---|---|---|---|---|---|---|---|---|---|
-| GHZ | 8 | 8 | 37 | 29 | 22% | 7 | 4 | 17 | ✓ |
-| GHZ | 12 | 12 | 57 | 45 | 21% | 11 | 7 | 25 | ✓ |
-| QFT, then its inverse | 5 | 33 | 283 | 3 | 99% | 0 | 0 | 1 | ✓ |
-| QFT, then its inverse | 8 | 76 | 764 | 4 | 99% | 0 | 0 | 1 | ✓ |
-| random | 6 | 60 | 260 | 203 | 22% | 40 | 8 | 140 | ✓ |
-| random | 8 | 120 | 483 | 355 | 27% | 68 | 26 | 242 | ✓ |
-| random | 10 | 200 | 692 | 548 | 21% | 100 | 33 | 312 | ✓ |
-| random | 12 | 300 | 1026 | 867 | 15% | 166 | 72 | 473 | ✓ |
+| Circuit | Qubits | Logical gates | Native | Compiled | Saved | cz | Moves | Layers | Gate time | Move time | Native, hardware = logical |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| GHZ | 8 | 8 | 37 | 29 | 22% | 7 | 4 | 17 | 7.3 µs | 25.0 µs | ✓ ✓ |
+| GHZ | 12 | 12 | 57 | 45 | 21% | 11 | 7 | 26 | 10.9 µs | 80.0 µs | ✓ ✓ |
+| QFT, then its inverse | 5 | 33 | 283 | 3 | 99% | 0 | 0 | 1 | 1.0 µs | 0 | ✓ ✓ |
+| QFT, then its inverse | 8 | 76 | 764 | 4 | 99% | 0 | 0 | 1 | 1.0 µs | 0 | ✓ ✓ |
+| random | 6 | 60 | 260 | 203 | 22% | 40 | 8 | 141 | 64.4 µs | 256.8 µs | ✓ ✓ |
+| random | 8 | 120 | 483 | 355 | 27% | 68 | 26 | 244 | 109.5 µs | 725.2 µs | ✓ ✓ |
+| random | 10 | 200 | 692 | 548 | 21% | 100 | 33 | 314 | 146.5 µs | 714.1 µs | ✓ ✓ |
+| random | 12 | 300 | 1026 | 867 | 15% | 166 | 72 | 496 | 219.3 µs | 1727.4 µs | ✓ ✓ |
 
 "Saved" is the share of native gates canonicalization removes. The QFT round trip collapses to the `x` gates that
-prepare its input, because the circuit is a unitary followed by its inverse. Reproduce the table with
-`python3 compiler/mlir/utils/qbench.py --build <build dir>`, or pass `--width 4` to see the effect of a tighter grid.
+prepare its input, because the circuit is a unitary followed by its inverse. Gate time and move time are the hardware
+program's, without the final readout. **Moves take 3–8× as long as all the gates together.** On this machine model,
+routing rather than gate count dominates a circuit's run time, which is what a move-aware router would optimize next.
+Reproduce the table with `python3 compiler/mlir/utils/qbench.py --build <build dir>`, or pass `--width 4` to see the
+effect of a tighter grid.
 
 ## Tests
 
@@ -222,6 +275,11 @@ prepare its input, because the circuit is a unitary followed by its inverse. Rep
   teleported state is the same every time.
 - `test/QNova/ops.mlir` and `invalid.mlir`: an if's two branches may each consume a qubit, but a loop may not
   consume one from outside it.
+- `test/Atom/qnova-to-atom.mlir`: a scheduled circuit as timed instructions, every start time checked by hand, and
+  a timing option changing the result.
+- `test/Atom/ops.mlir`, `invalid.mlir`, `unscheduled.mlir`: the instructions round-trip; a Rydberg pair must be
+  neighbours; a circuit must be scheduled first.
+- `test/Run/hardware.mlir`: a circuit compiled to hardware instructions, run by site, gives the logical probabilities.
 
 ## What would come next
 
@@ -231,4 +289,6 @@ prepare its input, because the circuit is a unitary followed by its inverse. Rep
   after use, and reusing atoms across a long circuit.
 - **Commutation-aware optimization beyond diagonal gates,** such as Pauli frame tracking and two-qubit block
   resynthesis.
-- **Lowering to a pulse-level dialect** instead of the simulator, as a real backend would.
+- **A move-aware router.** Moves dominate the run time (above), so the next optimization is routing that moves atoms
+  less: placement from the circuit's interaction graph, parallel moves in one tweezer sweep, and moving atoms back.
+- **Pulse shapes under the instructions,** and a machine description file for the timing model instead of options.
