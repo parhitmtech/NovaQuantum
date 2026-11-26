@@ -1562,6 +1562,11 @@ namespace
         {
             int v = expr(arg);
             VarType t = type_of(arg);
+            if (t == TYPE_TENSOR)  // print(t) prints the elements, as tensor_print(t) does, not the tensor's handle
+            {
+                tensor_op(TEN_PRINT, {v}, {TYPE_TENSOR}, line(n));
+                return;
+            }
             node = add(OUT, line(n));
             node->output_inst.var_index = v;
             node->output_inst.is_string = node->output_inst.is_string_var = t == TYPE_STRING;

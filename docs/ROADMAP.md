@@ -214,7 +214,16 @@ the LICM safety rules, broadcasting through `MatmulPlan`, and the kernel steps. 
   `nova.add_scalar`, in the interpreter's forms (`t / k` is `t * (1 / k)`), so both round alike. A program without
   tensors compiles to a native binary: `--convert-nova-to-runtime` turns nova ops into calls to a C runtime, and
   `nova-opt --nova-to-llvm` then runs MLIR's own conversions to the llvm dialect, for `mlir-translate` and `clang`.
-  Next: tensors through the runtime, and a test that runs each program both ways and compares the output.
+  Tensors too: `!nova.tensor<f64>` becomes a pointer to the runtime's tensor, through function signatures, calls and
+  `scf` (MLIR's structural type conversions), and the runtime computes, prints and fails as the interpreter does.
+  `nova-compile prog.nova -o prog` does it all in one process. Integer `/` and `%` check their divisor
+  (`nova.check_divisor`, dropped for a constant divisor) and wrap `INT_MIN / -1` as the interpreter does, where
+  LLVM's `sdiv` is undefined; an op that can raise a runtime error writes a `nova.runtime_error` resource, so no
+  pass removes or moves it. `utils/difftest.py` runs every program both ways in CI: all 28 test and benchmark
+  programs that compile natively match the interpreter's stdout, stderr and exit status, and it found two bugs
+  (the interpreter's `print(t)` printed a tensor's handle; integer division by zero was undefined natively). Native
+  code is 37–220× faster than the interpreter and within 1.2× of the same program in C (`utils/benchmark.py`).
+  Next: classes, strings and containers through the runtime, and the tensor checks as their own ops.
 - Frames, variable lifetimes and memory (phase 6) come from the dialect's lowering instead of slot ranges.
 
 **D. A tile-level kernel language in Nova.** `kernel` functions that work on blocks of a tensor, as Triton's do:

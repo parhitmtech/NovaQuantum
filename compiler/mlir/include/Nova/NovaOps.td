@@ -32,11 +32,19 @@ def Nova_TensorType : TypeDef<Nova_Dialect, "Tensor"> {
 //     nova.get of one element merge, two nova.zeros never do.
 //   - LICM hoists only ops with no effects, so a zeros in a loop stays there, one new tensor per iteration.
 //   - An op whose only effects are allocating its results and reading is dead when nothing uses its results, so
-//     canonicalize still removes a zeros or a matmul nothing uses.
+//     canonicalize removes a nova.scale nothing uses.
+//
+// Runtime errors are an effect too. An op that can stop the program (a shape that does not fit, an index out of
+// range, a negative size, a zero divisor) writes Nova_RuntimeError, a resource of its own (NovaOps.h): so it is
+// never removed for an unused result, nor moved to where it would not have run, and the error the interpreter
+// reports is reported here too. The price: two equal reads of one element are not merged, since each may fail. A
+// later step can split each check into its own op that a pass proves away, as check_divisor already is.
+def Nova_RuntimeError : Resource<"::nova::RuntimeErrorResource">;
+defvar CanFail = MemoryEffects<[MemWrite<Nova_RuntimeError>]>;
 
 // A new tensor filled with one value: %t = nova.zeros %rows, %cols : !nova.tensor<f64>. A TableGen class, so zeros
-// and ones are written once; each def below is one op.
-class Nova_FillOp<string mnemonic, string what> : Nova_Op<mnemonic> {
+// and ones are written once; each def below is one op. A negative size is a runtime error.
+class Nova_FillOp<string mnemonic, string what> : Nova_Op<mnemonic, [CanFail]> {
     let summary = "a new tensor of " # what;
     let arguments = (ins Variadic<Index>:$sizes);
     let results = (outs Res<Nova_TensorType, "the new tensor", [MemAlloc]>:$result);
@@ -50,7 +58,7 @@ def Nova_OnesOp : Nova_FillOp<"ones", "ones">;     // Nova's ones(r, c) and tens
 // interpreter's)
 // Both operands and the result have one type (AllTypesMatch), so the assembly writes it once; the verifier adds
 // what a trait cannot say: matmul needs floats. It reads its operands and makes a new tensor.
-def Nova_MatmulOp : Nova_Op<"matmul", [AllTypesMatch<["lhs", "rhs", "result"]>]> {
+def Nova_MatmulOp : Nova_Op<"matmul", [AllTypesMatch<["lhs", "rhs", "result"]>, CanFail]> {
     let summary = "matrix product, batched when an operand has rank 3 or more";
     let arguments = (ins Arg<Nova_TensorType, "", [MemRead]>:$lhs, Arg<Nova_TensorType, "", [MemRead]>:$rhs);
     let results = (outs Res<Nova_TensorType, "the product, a new tensor", [MemAlloc]>:$result);
@@ -64,8 +72,8 @@ defvar ElementType = "::llvm::cast<::nova::TensorType>($_self).getElementType()"
 // %x = nova.get %t[%i, %j] : !nova.tensor<f64>   (Nova's t[i, j] and tensor_get(t, i, j))
 // One subscript per dimension; the rank is known only at run time, so the verifier cannot count them. The result
 // is the tensor's element type (TypesMatchWith), so the assembly does not write it.
-def Nova_GetOp : Nova_Op<"get", [TypesMatchWith<"the result is the tensor's element type", "tensor", "result",
-                                                ElementType>]> {
+def Nova_GetOp : Nova_Op<"get", [CanFail, TypesMatchWith<"the result is the tensor's element type", "tensor", "result",
+                                                         ElementType>]> {
     let summary = "read one element of a tensor";
     let arguments = (ins Arg<Nova_TensorType, "the tensor read", [MemRead]>:$tensor, Variadic<Index>:$indices);
     let results = (outs AnyType:$result);
@@ -74,8 +82,8 @@ def Nova_GetOp : Nova_Op<"get", [TypesMatchWith<"the result is the tensor's elem
 
 // nova.set %x, %t[%i, %j] : !nova.tensor<f64>   (Nova's t[i, j] = x and tensor_set(t, i, j, x))
 // It changes the tensor in place: the SSA value %t still names the same tensor afterwards.
-def Nova_SetOp : Nova_Op<"set", [TypesMatchWith<"the value is the tensor's element type", "tensor", "value",
-                                                ElementType>]> {
+def Nova_SetOp : Nova_Op<"set", [CanFail, TypesMatchWith<"the value is the tensor's element type", "tensor", "value",
+                                                         ElementType>]> {
     let summary = "write one element of a tensor";
     let arguments = (ins AnyType:$value, Arg<Nova_TensorType, "the tensor written", [MemWrite]>:$tensor,
                          Variadic<Index>:$indices);
@@ -86,7 +94,8 @@ def Nova_SetOp : Nova_Op<"set", [TypesMatchWith<"the value is the tensor's eleme
 // A new tensor, each element the two operands' elements combined. The operands have the same shape, or (add and
 // sub) one is a 1xN row, which is combined with every row of the other: for add either one, for sub the right one.
 // Shapes are known only at run time, so the runtime checks them, as the interpreter's does.
-class Nova_ElementwiseOp<string mnemonic, string what> : Nova_Op<mnemonic, [AllTypesMatch<["lhs", "rhs", "result"]>]> {
+class Nova_ElementwiseOp<string mnemonic, string what>
+    : Nova_Op<mnemonic, [AllTypesMatch<["lhs", "rhs", "result"]>, CanFail]> {
     let summary = "element-wise " # what # " of two tensors";
     let arguments = (ins Arg<Nova_TensorType, "", [MemRead]>:$lhs, Arg<Nova_TensorType, "", [MemRead]>:$rhs);
     let results = (outs Res<Nova_TensorType, "a new tensor", [MemAlloc]>:$result);
@@ -112,6 +121,17 @@ class Nova_ScalarOp<string mnemonic, string what>
 
 def Nova_ScaleOp : Nova_ScalarOp<"scale", "every element times a number">;
 def Nova_AddScalarOp : Nova_ScalarOp<"add_scalar", "every element plus a number">;
+
+// nova.check_divisor %b : i32   (before each of Nova's integer a / b and a % b)
+// Stops the program with "integer division by zero" when %b is 0, as the interpreter does, where arith.divsi by
+// zero is undefined behavior. It can fail, so it is never removed or moved (Nova_RuntimeError), except that
+// canonicalize drops it when %b is a constant other than 0.
+def Nova_CheckDivisorOp : Nova_Op<"check_divisor", [CanFail]> {
+    let summary = "stop the program if an integer divisor is zero";
+    let arguments = (ins AnySignlessInteger:$divisor);
+    let assemblyFormat = "$divisor attr-dict `:` type($divisor)";
+    let hasCanonicalizeMethod = 1;  // CheckDivisorOp::canonicalize in NovaOps.cpp
+}
 
 // nova.print %t : !nova.tensor<f64>   (Nova's print and tensor_print: writes, so not Pure)
 def Nova_PrintOp : Nova_Op<"print"> {

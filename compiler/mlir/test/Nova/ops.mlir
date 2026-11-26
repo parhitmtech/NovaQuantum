@@ -45,3 +45,10 @@ func.func @arith(%a: !nova.tensor<f64>, %b: !nova.tensor<f64>, %k: f64) -> !nova
   %shifted = nova.add_scalar %scaled, %k : !nova.tensor<f64>
   return %shifted : !nova.tensor<f64>
 }
+
+// CHECK-LABEL: func.func @check
+func.func @check(%b: i32) {
+  // CHECK: nova.check_divisor %{{.*}} : i32
+  nova.check_divisor %b : i32
+  return
+}

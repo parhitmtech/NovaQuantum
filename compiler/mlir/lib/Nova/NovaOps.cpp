@@ -2,6 +2,8 @@
 #include "Nova/NovaOps.h"
 
 #include "mlir/IR/Builders.h"  // the generated parsers build types through the parser's Builder
+#include "mlir/IR/Matchers.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/OpImplementation.h"
 
 #define GET_OP_CLASSES
@@ -15,5 +17,14 @@ LogicalResult nova::MatmulOp::verify()
 {
     Type element = llvm::cast<nova::TensorType>(getResult().getType()).getElementType();
     if (!llvm::isa<FloatType>(element)) return emitOpError("needs tensors of floats, not of ") << element;
+    return success();
+}
+
+// A check of a divisor known not to be zero can never stop the program: x / 2 needs none
+LogicalResult nova::CheckDivisorOp::canonicalize(CheckDivisorOp op, PatternRewriter& rewriter)
+{
+    APInt value;
+    if (!matchPattern(op.getDivisor(), m_ConstantInt(&value)) || value.isZero()) return failure();
+    rewriter.eraseOp(op);
     return success();
 }

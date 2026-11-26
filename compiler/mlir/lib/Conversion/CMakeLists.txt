@@ -15,7 +15,11 @@ add_mlir_library(NovaConversion
     MLIRFuncDialect
     MLIRSCFDialect
     MLIRUBDialect
+    MLIRLLVMDialect
+    MLIRFuncTransforms
+    MLIRSCFTransforms
     MLIRTransformUtils
+    MLIRTransforms
     MLIRPass
     # MLIR's own conversions, which --nova-to-llvm runs after Nova's
     MLIRSCFToControlFlow
