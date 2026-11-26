@@ -188,6 +188,10 @@ int main(int argc, char** argv)
     printf("%-8s %6s %6s %12s %12s %10s %8s %8s %10s %7s %10s\n", "circuit", "qubits", "gates", "CPU 1 thr",
            "CPU all", "GPU", "vs 1 thr", "vs all", "GPU GB/s", "% peak", "max |diff|");
 
+    // Warm up before timing: OpenMP starts its thread pool, and CUDA loads each kernel, on first use
+    run_cpu(layers(10, 1), cores);
+    run_gpu(layers(10, 1));
+
     int failures = 0;
     for (int n = lo; n <= hi; n += 2)
     {

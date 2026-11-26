@@ -29,6 +29,18 @@ gate is the GPU's memory bandwidth, and every kernel is a single coalesced pass 
 The benchmark reports each run's effective bandwidth (the bytes each gate's kernel must move, over the time) next
 to the GPU's peak, which is the right yardstick for a memory-bound code.
 
+## Results
+
+On SOL's A100-SXM4-80GB against 16 cores of an AMD EPYC 7413 (the full table is in
+[BENCHMARKS.md](../../../../docs/BENCHMARKS.md#the-statevector-simulator-on-a-gpu)):
+
+- **Correct:** every amplitude matches the CPU's to 2.8 × 10⁻¹⁷ at every size up to 24 qubits, and the drop-in
+  runtime prints byte-identical output on both.
+- **Memory-bound at the hardware limit:** 22–28 qubits sustain 1.57–1.66 TB/s on the layered circuit, 77–81% of the
+  2,039 GB/s peak. At 20 qubits the 16 MB state fits in the 40 MB L2 cache (135% of DRAM peak). At 16–18 qubits the
+  kernels are launch-bound.
+- **Fast:** 256–529× one CPU core and 21–37× sixteen at 20–24 qubits; 28 qubits, 695 gates, in 3.1 s.
+
 ## Running it on SOL
 
 ```sh

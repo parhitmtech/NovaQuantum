@@ -118,6 +118,10 @@ a block argument, and an `if` carries it out as a result:
   CI requires identical probabilities. It runs the hardware program too, by site. That check found a scheduler bug
   in which two atoms collided, invisible at the gate level
   ([QUANTUM.md](docs/QUANTUM.md#the-hardware-layer-timed-instructions-the-atom-dialect)).
+- **On the GPU.** A CUDA statevector simulator (one coalesced kernel per gate) is a drop-in for the runtime
+  (`nova-compile --gpu`). On an A100-80GB it matches the CPU to 10⁻¹⁷ and sustains **1.6 TB/s, 77–81% of peak
+  memory bandwidth**, **256–529× faster** than one CPU core and 21–37× faster than 16 at 20–24 qubits; a 28-qubit
+  circuit of 695 gates takes 3.1 s ([BENCHMARKS.md](docs/BENCHMARKS.md#the-statevector-simulator-on-a-gpu)).
 
 | Circuit | Qubits | Native gates | Compiled | Saved | Moves | Layers | Gate time | Move time | = logical |
 |---|---|---|---|---|---|---|---|---|---|
