@@ -9,7 +9,8 @@ using namespace std;
 namespace {
     bool is_type_keyword(TokenType k)
     {
-        return k == INT_TYPE || k == FLOAT_TYPE || k == DOUBLE_TYPE || k == BOOL_TYPE || k == STRING_TYPE || k == TENSOR_TYPE;
+        return k == INT_TYPE || k == FLOAT_TYPE || k == DOUBLE_TYPE || k == BOOL_TYPE || k == STRING_TYPE || k == TENSOR_TYPE ||
+               k == QUBIT_TYPE;
     }
 
     // How tightly a binary operator binds, loosest first; 0 if the token is not one. Level 3 is 'not', a prefix.

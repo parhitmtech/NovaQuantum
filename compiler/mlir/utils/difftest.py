@@ -10,7 +10,8 @@ of the two lowerings.
 
 A program nova-compile does not lower yet (strings, classes, containers, ...) is counted, with the reason, but is
 not a failure: the report says how much of the language the native path covers. A program the front end rejects is
-skipped (both paths share the front end). Exit status 1 if any compiled program differs.
+skipped (both paths share the front end). A quantum program, which the interpreter does not run, is counted as
+native only. Exit status 1 if any compiled program differs.
 """
 import argparse
 import collections
@@ -53,7 +54,7 @@ def main():
     env_home = os.path.dirname(os.path.abspath(args.interpreter.rstrip("/")))
     os.environ.setdefault("NOVA_HOME", os.path.dirname(env_home))  # compiler/, for the interpreter's stdlib
 
-    match, differ, unlowered, rejected, skipped = [], [], [], [], []
+    match, differ, unlowered, rejected, skipped, native_only = [], [], [], [], [], []
     reasons = collections.Counter()
     with tempfile.TemporaryDirectory() as tmp:
         exe = os.path.join(tmp, "program")
@@ -82,6 +83,11 @@ def main():
                 continue
             native = run([exe], stdin_path, args.timeout)
             interp = run([args.interpreter, src], stdin_path, args.timeout)
+            if interp[0] == 1 and b"run only in native code" in interp[2]:  # a quantum program: no interpreter
+                native_only.append(src)
+                if args.verbose:
+                    print(f"  native only   {os.path.basename(src)}")
+                continue
             if native == interp:
                 match.append(src)
                 if args.verbose:
@@ -95,9 +101,10 @@ def main():
                         print(f"  {label}, native:      {a[:300]!r}")
                         print(f"  {label}, interpreter: {b[:300]!r}")
 
-    total = len(match) + len(differ) + len(unlowered) + len(rejected)
+    total = len(match) + len(differ) + len(unlowered) + len(rejected) + len(native_only)
     print(f"\n{total} programs: {len(match) + len(differ)} compiled natively, {len(match)} same as the interpreter, "
           f"{len(differ)} different; {len(unlowered)} not lowered yet; {len(rejected)} rejected by the front end"
+          + (f"; {len(native_only)} quantum, native only" if native_only else "")
           + (f"; {len(skipped)} flag tests skipped" if skipped else ""))
     if reasons:
         print("Not lowered yet, by first reason:")

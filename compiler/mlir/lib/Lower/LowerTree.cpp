@@ -50,6 +50,7 @@
 #include "lexer.h"  // token kinds
 
 #include "Nova/NovaOps.h"
+#include "QNova/QNovaOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -136,6 +137,8 @@ class Lowerer
         mlir::Value negate(uint32_t n, mlir::Value t);  // -t, a new tensor
         llvm::SmallVector<mlir::Value> call(uint32_t n);  // the values it gives: none, one, or several
         llvm::SmallVector<mlir::Value> builtin(uint32_t n, llvm::StringRef name, const std::vector<uint32_t>& args);
+        llvm::SmallVector<mlir::Value> quantum(uint32_t n, llvm::StringRef gate, const std::vector<uint32_t>& args);
+        bool qpu_call(uint32_t n);  // whether n is a call qpu.gate(...)
         bool subscript(uint32_t n, mlir::Value& t, llvm::SmallVector<mlir::Value>& at);  // t[i, j]: t, and i, j
         mlir::Value to_index(uint32_t n, mlir::Value v);  // an int as a size or subscript
         mlir::Value convert(uint32_t n, mlir::Value v, mlir::Type to);
@@ -164,6 +167,7 @@ mlir::Type Lowerer::type(TypeId t)
         case TypeKind::Double:  return builder.getF64Type();
         case TypeKind::Bool:    return builder.getI1Type();
         case TypeKind::Tensor:  return nova::TensorType::get(builder.getContext(), builder.getF64Type());
+        case TypeKind::Qubit:   return qnova::QubitType::get(builder.getContext());
         default:                return nullptr;
     }
 }
@@ -497,6 +501,13 @@ std::vector<uint32_t> Lowerer::assigned(uint32_t from, uint32_t to)
         {
             uint32_t target = tree.children(m)[0];
             if (tree.kind(target) == NodeKind::Name) keys.push_back(in.refs[target]);
+        }
+        else if (qpu_call(m))  // a gate gives its qubit variables new values, as an assignment does
+        {
+            std::vector<uint32_t> kids = tree.children(m);
+            for (size_t a = 1; a < kids.size(); a++)
+                if (tree.kind(kids[a]) == NodeKind::Name && var_type(in.refs[kids[a]]) == TypeTable::Qubit)
+                    keys.push_back(in.refs[kids[a]]);
         }
         for (uint32_t key : keys)
             if (values.count(key) && seen.insert(key).second) vars.push_back(key);
@@ -925,6 +936,8 @@ llvm::SmallVector<mlir::Value> Lowerer::call(uint32_t n)
 {
     std::vector<uint32_t> kids = tree.children(n);
     uint32_t callee = kids[0];
+    if (qpu_call(n))  // qpu.h(q), qpu.cx(a, b), ...: the qnova dialect
+        return quantum(n, tree.spelling(callee), std::vector<uint32_t>(kids.begin() + 1, kids.end()));
     uint32_t e = tree.kind(callee) == NodeKind::Name ? in.refs[callee] : NoEntity;
     EntityKind kind = e == NoEntity ? EntityKind::None : in.entities[e].kind;
     if (kind == EntityKind::Builtin)
@@ -944,6 +957,84 @@ llvm::SmallVector<mlir::Value> Lowerer::call(uint32_t n)
     if (!ok()) return {};
     auto op = builder.create<mlir::func::CallOp>(loc(n), symbol(fn, c), returns, args);
     return llvm::SmallVector<mlir::Value>(op.getResults());
+}
+
+bool Lowerer::qpu_call(uint32_t n)
+{
+    if (tree.kind(n) != NodeKind::Call) return false;
+    uint32_t callee = tree.children(n)[0];
+    if (tree.kind(callee) != NodeKind::Member) return false;
+    uint32_t base = tree.children(callee)[0];
+    uint32_t e = tree.kind(base) == NodeKind::Name ? in.refs[base] : NoEntity;
+    return e != NoEntity && in.entities[e].kind == EntityKind::Module && tree.spelling(base) == "qpu";
+}
+
+// Quantum circuits written in Nova: the qnova dialect (docs/QUANTUM.md). In Nova a gate changes the qubit variables
+// it is given, qpu.h(q), as Python libraries write it; in qnova a qubit is an SSA value each gate consumes and
+// produces, %q1 = qnova.h %q0. The same SSA construction that gives a variable a new value at each assignment gives a
+// qubit variable the gate's new value: values[q] is the qubit's current wire. A loop or an if that applies a gate
+// carries the qubit like any variable it assigns (assigned()), so the circuit's wires go through scf as block
+// arguments and results. qpu.probs is a qubit's last use: the variable holds no value after it.
+llvm::SmallVector<mlir::Value> Lowerer::quantum(uint32_t n, llvm::StringRef gate, const std::vector<uint32_t>& args)
+{
+    mlir::Location at = loc(n);
+    if (gate == "alloc") return {builder.create<qnova::AllocOp>(at).getQubit()};
+
+    // The qubits: each argument a qubit variable, its current value; then the angles, as f64
+    llvm::SmallVector<uint32_t> vars;
+    llvm::SmallVector<mlir::Value> qubits, angles;
+    for (uint32_t a : args)
+    {
+        if (tree.kind(a) == NodeKind::Name && var_type(in.refs[a]) == TypeTable::Qubit)
+        {
+            auto v = values.find(in.refs[a]);
+            if (v == values.end() || !v->second)
+            {
+                fail(a, "a qubit after qpu.probs, its last use");
+                return {};
+            }
+            vars.push_back(in.refs[a]);
+            qubits.push_back(v->second);
+        }
+        else angles.push_back(convert(a, expr(a), builder.getF64Type()));
+    }
+    if (!ok()) return {};
+
+    mlir::Operation* op = nullptr;
+    if (gate == "h") op = builder.create<qnova::HOp>(at, qubits[0]);
+    else if (gate == "x") op = builder.create<qnova::XOp>(at, qubits[0]);
+    else if (gate == "y") op = builder.create<qnova::YOp>(at, qubits[0]);
+    else if (gate == "z") op = builder.create<qnova::ZOp>(at, qubits[0]);
+    else if (gate == "s") op = builder.create<qnova::SOp>(at, qubits[0]);
+    else if (gate == "t") op = builder.create<qnova::TOp>(at, qubits[0]);
+    else if (gate == "rx") op = builder.create<qnova::RxOp>(at, qubits[0], angles[0]);
+    else if (gate == "ry") op = builder.create<qnova::RyOp>(at, qubits[0], angles[0]);
+    else if (gate == "rz") op = builder.create<qnova::RzOp>(at, qubits[0], angles[0]);
+    else if (gate == "cx") op = builder.create<qnova::CxOp>(at, qubits[0], qubits[1]);
+    else if (gate == "cz") op = builder.create<qnova::CzOp>(at, qubits[0], qubits[1]);
+    else if (gate == "swap") op = builder.create<qnova::SwapOp>(at, qubits[0], qubits[1]);
+    else if (gate == "cp") op = builder.create<qnova::CpOp>(at, qubits[0], qubits[1], angles[0]);
+    else if (gate == "measure")
+    {
+        auto m = builder.create<qnova::MeasureOp>(at, qubits[0]);
+        values[vars[0]] = m.getOut();  // the qubit after, collapsed
+        return {m.getBit()};
+    }
+    else if (gate == "probs")
+    {
+        builder.create<qnova::ProbsOp>(at, qubits);
+        for (uint32_t v : vars) values.erase(v);  // used up
+        return {};
+    }
+    else
+    {
+        fail(n, "qpu." + gate.str());
+        return {};
+    }
+
+    // The gate's results are its qubits' new values, in the order it was given them
+    for (size_t k = 0; k < vars.size(); k++) values[vars[k]] = op->getResult(k);
+    return {};
 }
 
 // The built-ins the nova dialect has ops for: print and tensor_print, zeros and ones (tensor_zeros, tensor_ones),
@@ -1077,8 +1168,8 @@ mlir::OwningOpRef<mlir::ModuleOp> nova::lower_file(mlir::MLIRContext& context, c
     }
 
     // The dialects lowering writes: their ops can be made only once they are loaded
-    context.loadDialect<nova::NovaDialect, mlir::arith::ArithDialect, mlir::func::FuncDialect, mlir::scf::SCFDialect,
-                        mlir::ub::UBDialect>();
+    context.loadDialect<nova::NovaDialect, qnova::QNovaDialect, mlir::arith::ArithDialect, mlir::func::FuncDialect,
+                        mlir::scf::SCFDialect, mlir::ub::UBDialect>();
     mlir::OwningOpRef<mlir::ModuleOp> module = lower_to_mlir(context, tree, checked, path, error);
     if (!module) return nullptr;
     // Every op's own verifier, and SSA's rule that a value is defined before it is used. A failure here is a bug

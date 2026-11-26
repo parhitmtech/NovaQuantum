@@ -146,6 +146,19 @@ int main(int argc, char* argv[])
             return 0;
         }
         if (flag_check) return 0;
+        // A quantum circuit (a qubit, or a qpu.* call) runs only as native code, on the runtime's simulator
+        for (uint32_t m = 0; m < tree.nodes.size(); m++)
+        {
+            bool qubit = m < checked.nodeTypes.size() && checked.nodeTypes[m] == TypeTable::Qubit;
+            bool qpu = tree.kind(m) == NodeKind::Name && checked.refs[m] != NoEntity &&
+                       checked.entities[checked.refs[m]].kind == EntityKind::Module && tree.spelling(m) == "qpu";
+            if (qubit || qpu)
+            {
+                fprintf(stderr, "Error at line %d: quantum operations run only in native code: compile this program "
+                                "with nova-compile\n", tree.token(m).line);
+                return 1;
+            }
+        }
         uint32_t n = unlowered(tree, checked);
         if (n != NoNode)
         {

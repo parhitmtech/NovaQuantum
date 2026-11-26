@@ -1,0 +1,5 @@
+# A quantum program runs only as native code (nova-compile), on the runtime's simulator: the interpreter says so
+ignite:
+    qubit q = qpu.alloc()
+    qpu.h(q)
+    qpu.probs(q)

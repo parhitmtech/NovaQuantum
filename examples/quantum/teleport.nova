@@ -1,0 +1,17 @@
+# Quantum teleportation: the state of a moves to c, using an entangled pair and two measurements
+ignite:
+    qubit a = qpu.alloc()
+    qubit b = qpu.alloc()
+    qubit c = qpu.alloc()
+    qpu.ry(a, 2.0943951023931953)   # the state to send: |1> with probability 0.75
+    qpu.h(b)
+    qpu.cx(b, c)                     # b and c entangled
+    qpu.cx(a, b)
+    qpu.h(a)
+    bool m1 = qpu.measure(a)
+    bool m2 = qpu.measure(b)
+    if (m2):
+        qpu.x(c)
+    if (m1):
+        qpu.z(c)
+    qpu.probs(c)                     # |0>: 0.2500  |1>: 0.7500, whatever was measured

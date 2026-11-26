@@ -50,7 +50,8 @@ namespace {
 
     bool is_type_keyword(TokenType k)
     {
-        return k == INT_TYPE || k == FLOAT_TYPE || k == DOUBLE_TYPE || k == BOOL_TYPE || k == STRING_TYPE || k == TENSOR_TYPE;
+        return k == INT_TYPE || k == FLOAT_TYPE || k == DOUBLE_TYPE || k == BOOL_TYPE || k == STRING_TYPE || k == TENSOR_TYPE ||
+               k == QUBIT_TYPE;
     }
 
     class Checker
@@ -181,6 +182,7 @@ namespace {
         add(EntityKind::BuiltinType, "map");
         add(EntityKind::Module, "hf");
         add(EntityKind::Module, "sol");
+        add(EntityKind::Module, "qpu");  // quantum circuits: qpu.alloc(), qpu.h(q), qpu.cx(a, b), qpu.measure(q), ...
         add(EntityKind::None, "none");
     }
 

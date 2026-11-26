@@ -1,0 +1,41 @@
+# RUN: nova-lower %s | FileCheck %s
+#
+# Quantum circuits written in Nova: qubit variables and qpu gates lower to the qnova dialect. A gate changes the
+# qubits it is given; in qnova each is an SSA value the gate consumes and produces, so lowering gives the variable
+# the gate's result, as it does a variable an assignment. A loop or an if that applies a gate carries the qubit
+# like any variable it assigns: as an scf.while block argument, as an scf.if result.
+
+# CHECK-LABEL: func.func @main()
+ignite:
+    # CHECK: %[[A:.*]] = qnova.alloc
+    # CHECK: %[[B:.*]] = qnova.alloc
+    qubit a = qpu.alloc()
+    qubit b = qpu.alloc()
+    # CHECK: %[[H:.*]] = qnova.h %[[B]]
+    # CHECK: %[[A1:.*]], %[[B1:.*]] = qnova.cx %[[A]], %[[H]]
+    qpu.h(b)
+    qpu.cx(a, b)
+    # An angle is an f64
+    # CHECK: %[[T:.*]] = arith.extf %{{.*}} : f32 to f64
+    # CHECK: %[[A2:.*]] = qnova.rz %[[A1]], %[[T]]
+    qpu.rz(a, 0.5)
+
+    # The loop carries a, the qubit its body applies a gate to, next to i
+    # CHECK: %[[W:.*]]:2 = scf.while (%{{.*}} = %{{.*}}, %{{.*}} = %[[A2]]) : (i32, !qnova.qubit) -> (i32, !qnova.qubit)
+    # CHECK: ^bb0(%{{.*}}: i32, %[[Q:.*]]: !qnova.qubit):
+    # CHECK: qnova.rx %[[Q]]
+    for (int i = 0; i < 3; i += 1):
+        qpu.rx(a, 0.25)
+
+    # A measurement gives a bool (i1) and the qubit after; the if's result is b, x applied or not
+    # CHECK: %[[M:.*]], %[[A3:.*]] = qnova.measure %[[W]]#1
+    # CHECK: %[[B2:.*]] = scf.if %[[M]] -> (!qnova.qubit) {
+    # CHECK:   %[[X:.*]] = qnova.x %[[B1]]
+    # CHECK:   scf.yield %[[X]] : !qnova.qubit
+    # CHECK: } else {
+    # CHECK:   scf.yield %[[B1]] : !qnova.qubit
+    # CHECK: qnova.probs %[[B2]]
+    bool m = qpu.measure(a)
+    if (m):
+        qpu.x(b)
+    qpu.probs(b)

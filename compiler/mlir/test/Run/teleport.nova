@@ -1,0 +1,31 @@
+# RUN: nova-compile %s -o %t.exe
+# RUN: env NOVA_SEED=1 %t.exe | FileCheck %s
+# RUN: env NOVA_SEED=2 %t.exe | FileCheck %s
+# RUN: env NOVA_SEED=7 %t.exe | FileCheck %s
+# RUN: nova-compile %s --logical -o %t.logical
+# RUN: %t.logical | FileCheck %s
+#
+# Quantum teleportation, written in Nova. The two measurements are random, so each seed takes other branches of the
+# ifs that correct c, but c always ends in the state a started in: |1> with probability sin^2(pi / 3) = 0.75. The
+# same holds compiled for the neutral-atom machine and run as written (--logical).
+
+# CHECK:      |0>: 0.2500
+# CHECK-NEXT: |1>: 0.7500
+
+# Quantum teleportation: the state of a moves to c, using an entangled pair and two measurements
+ignite:
+    qubit a = qpu.alloc()
+    qubit b = qpu.alloc()
+    qubit c = qpu.alloc()
+    qpu.ry(a, 2.0943951023931953)   # the state to send: |1> with probability 0.75
+    qpu.h(b)
+    qpu.cx(b, c)                     # b and c entangled
+    qpu.cx(a, b)
+    qpu.h(a)
+    bool m1 = qpu.measure(a)
+    bool m2 = qpu.measure(b)
+    if (m2):
+        qpu.x(c)
+    if (m1):
+        qpu.z(c)
+    qpu.probs(c)                     # |0>: 0.2500  |1>: 0.7500, whatever was measured

@@ -315,6 +315,23 @@ orbit std.math              # abs, min, max, clamp: generic, for int, float and 
 
 ML libraries stay under `novatorch` (`orbit novatorch.nn`, `orbit novatorch.optim`).
 
+Quantum circuits use the built-in `qpu` module and the `qubit` type, and compile to native code only
+(`nova-compile`; [QUANTUM.md](QUANTUM.md)):
+
+```python
+qubit a = qpu.alloc()            # a fresh qubit, |0>
+qubit b = qpu.alloc()
+qpu.h(a)                         # gates change the qubits they are given: h x y z s t, rx ry rz (q, angle),
+qpu.cx(a, b)                     #   cx cz swap (a, b), cp (a, b, angle)
+bool m = qpu.measure(a)
+if (m):
+    qpu.x(b)
+qpu.probs(b)                     # prints each basis state's probability: |0>: 0.5000 ...
+```
+
+A qubit cannot be copied (no-cloning): it starts from `qpu.alloc()`, is never assigned, and is not passed to
+functions; a gate takes each qubit once.
+
 ## 11. Today -> target
 
 | Today | Target |

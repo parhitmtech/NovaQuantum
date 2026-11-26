@@ -1,0 +1,1 @@
+Error at line 3: quantum operations run only in native code: compile this program with nova-compile

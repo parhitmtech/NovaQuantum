@@ -28,7 +28,7 @@ extern const set<TensorOp> TENSOR_INT_OPS;
 TypeTable::TypeTable()
 {
     for (TypeKind k : {TypeKind::Unknown, TypeKind::Int, TypeKind::Float, TypeKind::Double, TypeKind::Bool,
-         TypeKind::String, TypeKind::Tensor, TypeKind::Array, TypeKind::None})
+         TypeKind::String, TypeKind::Tensor, TypeKind::Array, TypeKind::None, TypeKind::Qubit})
     {
         intern({k});
     }
@@ -57,6 +57,7 @@ string type_name(const CheckResult& checked, TypeId id)
         case TypeKind::Tensor:      return "Tensor";
         case TypeKind::Array:       return "array";
         case TypeKind::None:        return "none";
+        case TypeKind::Qubit:       return "qubit";
         case TypeKind::Vector:      return "vector<" + type_name(checked, t.a) + ">";
         case TypeKind::Map:         return "map<" + type_name(checked, t.a) + ", " + type_name(checked, t.b) + ">";
         case TypeKind::Struct:      return string(names.text(checked.entities[t.a].name));
@@ -75,7 +76,8 @@ string type_name(const CheckResult& checked, TypeId id)
 namespace {
     constexpr TypeId Unknown = TypeTable::Unknown, Int = TypeTable::Int, Float = TypeTable::Float,
                      Double = TypeTable::Double, Bool = TypeTable::Bool, String = TypeTable::String,
-                     Tensor = TypeTable::Tensor, Array = TypeTable::Array, None = TypeTable::None;
+                     Tensor = TypeTable::Tensor, Array = TypeTable::Array, None = TypeTable::None,
+                     Qubit = TypeTable::Qubit;
 
     bool is_number(TypeId t) { return t == Int || t == Float || t == Double || t == Bool; }
 
@@ -179,6 +181,8 @@ namespace {
             void construct(uint32_t n, TypeId type, const vector<TypeId>& args);
             TypeId call_member(uint32_t n, uint32_t callee, const vector<uint32_t>& args, bool statement);
             TypeId call_module(uint32_t n, const string& module, const string& method, const vector<uint32_t>& args);
+            TypeId call_qpu(uint32_t n, const string& method, const vector<uint32_t>& args);
+            bool qpu_alloc(uint32_t n);  // whether n is the call qpu.alloc()
             TypeId call_method(uint32_t n, uint32_t callee, TypeId object, const vector<TypeId>& args);
             TypeId call_container(uint32_t n, uint32_t callee, TypeId container, const vector<TypeId>& args, bool statement);
             void check_key(uint32_t n, uint32_t container, TypeId type, TypeId key);
@@ -345,6 +349,7 @@ namespace {
             case BOOL_TYPE:     return Bool;
             case STRING_TYPE:   return String;
             case TENSOR_TYPE:   return Tensor;  // Tensor<float> too: the element type is checked by the lexer
+            case QUBIT_TYPE:    return Qubit;
             default:            break;
         }
         uint32_t e = out.refs[n];
@@ -659,6 +664,11 @@ namespace {
             case NodeKind::VarDecl:
             {
                 TypeId declared = written(kids[0], true);
+                if (declared == Qubit && !qpu_alloc(kids.size() > 1 ? kids[1] : NoNode))
+                {
+                    error(n, "qubit '" + text(n) + "' starts from qpu.alloc(), a fresh qubit: a quantum state cannot be "
+                             "copied (no-cloning)");
+                }
                 if (kids.size() > 1) check_assign(n, expr(kids[1]), declared);
                 else if (declared == String)
                 {
@@ -714,6 +724,13 @@ namespace {
             } 
             case NodeKind::Assign:
             {
+                if (expr(kids[0]) == Qubit)
+                {
+                    error(n, "a qubit cannot be assigned: a quantum state cannot be copied (no-cloning); apply gates "
+                             "to it instead");
+                    expr(kids[1]);
+                    return;
+                }
                 store(kids[0], expr(kids[1]));
                 return;
             }
@@ -795,6 +812,14 @@ namespace {
         vector<TypeId> types;
         for (uint32_t v : values) types.push_back(expr(v));
         if (context.function == NoNode || values.empty()) return;  // outside a function (reported with the names)
+        for (TypeId t : types)
+        {
+            if (t == Qubit)
+            {
+                error(n, "a qubit cannot be returned from a function yet: apply gates to it where it is allocated");
+                return;
+            }
+        }
         Signature& sig = signature(context.function, context.method, context.instance);
         const string& f = context.label;
         for (size_t i = 0; i < types.size() && sig.inferred; i++)  // a written struct return is reported with the type
@@ -1235,6 +1260,15 @@ namespace {
     // f(args). A generic function's call uses the copy for its argument types, made and checked the first time.
     TypeId Typer::call_function(uint32_t n, uint32_t fn, const string& f, const vector<TypeId>& args)
     {
+        for (TypeId a : args)
+        {
+            if (a == Qubit)
+            {
+                error(n, "a qubit cannot be passed to a function yet (only to the qpu gates): a function gets a copy "
+                         "of a value, and a quantum state cannot be copied");
+                return Unknown;
+            }
+        }
         Signature sig = signature(fn, false);  // a copy: checking the callee below adds signatures
         if (args.size() != sig.params.size())
         {
@@ -1326,12 +1360,86 @@ namespace {
         return Unknown;
     }
 
+    // Quantum circuits (docs/QUANTUM.md). qpu.alloc() gives a fresh qubit, |0>. A gate changes the qubits it is given,
+    // in place, as Python libraries write it: qpu.h(q), qpu.x(q), qpu.y(q), qpu.z(q), qpu.s(q), qpu.t(q); with an angle
+    // in radians, qpu.rx(q, a), qpu.ry(q, a), qpu.rz(q, a); on two qubits, qpu.cx(a, b), qpu.cz(a, b), qpu.swap(a, b)
+    // and qpu.cp(a, b, angle). qpu.measure(q) gives a bool; qpu.probs(a, b, ...) prints the probability of each basis
+    // state of up to 12 qubits. A gate's qubits must be variables, all different: lowering gives each variable the
+    // gate's new value (an SSA value of !qnova.qubit), so a qubit variable is a wire of the circuit.
+    TypeId Typer::call_qpu(uint32_t n, const string& method, const vector<uint32_t>& args)
+    {
+        static const map<string, pair<size_t, size_t>> gates = {  // qubits, then angles
+            {"h", {1, 0}},  {"x", {1, 0}},  {"y", {1, 0}},  {"z", {1, 0}},    {"s", {1, 0}},  {"t", {1, 0}},
+            {"rx", {1, 1}}, {"ry", {1, 1}}, {"rz", {1, 1}}, {"cx", {2, 0}},   {"cz", {2, 0}}, {"swap", {2, 0}},
+            {"cp", {2, 1}}, {"measure", {1, 0}},
+        };
+        vector<TypeId> types;
+        for (uint32_t a : args) types.push_back(expr(a));
+        string label = "'qpu." + method + "'";
+        size_t qubits = 0, angles = 0;
+        if (method == "alloc")
+        {
+            if (!args.empty()) error(n, label + " takes no arguments");
+            return Qubit;
+        }
+        if (method == "probs")
+        {
+            qubits = args.size();
+            if (qubits == 0 || qubits > 12) error(n, label + " takes 1 to 12 qubits, not " + to_string(qubits));
+        }
+        else
+        {
+            auto it = gates.find(method);
+            if (it == gates.end())
+            {
+                error(n, "unknown qpu method: qpu." + method + "() (gates: h, x, y, z, s, t, rx, ry, rz, cx, cz, cp, "
+                         "swap; and alloc, measure, probs)");
+                return Unknown;
+            }
+            qubits = it->second.first;
+            angles = it->second.second;
+            if (args.size() != qubits + angles)
+            {
+                error(n, label + " expects " + to_string(qubits + angles) + " argument(s) but got " +
+                         to_string(args.size()));
+                return method == "measure" ? Bool : Unknown;
+            }
+        }
+        set<uint32_t> seen;
+        for (size_t i = 0; i < args.size(); i++)
+        {
+            string which = "argument " + to_string(i + 1) + " of " + label;
+            if (i >= qubits)
+            {
+                if (!is_number(types[i]) && types[i] != Unknown)
+                    error(args[i], which + " expects an angle in radians, a number, but got " + name(types[i]));
+            }
+            else if (types[i] != Qubit && types[i] != Unknown)
+                error(args[i], which + " expects a qubit but got " + name(types[i]));
+            else if (tree.kind(args[i]) != NodeKind::Name)
+                error(args[i], label + " takes qubit variables: the gate changes the qubit each one holds");
+            else if (!seen.insert(out.refs[args[i]]).second)
+                error(args[i], label + " is given the same qubit twice");
+        }
+        return method == "measure" ? Bool : Unknown;
+    }
+
+    bool Typer::qpu_alloc(uint32_t n)
+    {
+        if (n == NoNode || tree.kind(n) != NodeKind::Call) return false;
+        uint32_t callee = tree.children(n)[0];
+        if (tree.kind(callee) != NodeKind::Member) return false;
+        uint32_t base = tree.children(callee)[0];
+        return tree.kind(base) == NodeKind::Name && text(base) == "qpu" && text(callee) == "alloc";
+    }
+
     // hf.infer(model, input), hf.generate(model, prompt, max_tokens), hf.classify(model, text), hf.dataset(name, split),
     // hf.set_token(token); sol.finetune(model=, task=, dataset=, epochs=, lr=, batch_size=), sol.wait(job),
     // sol.predict(job, input), sol.save(job, path), sol.set_key(path). The values are strings, except max_tokens,
     // epochs, batch_size and lr: the instruction holds those, so they are numbers written out.
     TypeId Typer::call_module(uint32_t n, const string& module, const string& method, const vector<uint32_t>& args)
     {
+        if (module == "qpu") return call_qpu(n, method, args);
         struct Method
         {
             const char* name;

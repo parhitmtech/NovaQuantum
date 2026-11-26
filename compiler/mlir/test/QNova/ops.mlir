@@ -34,3 +34,18 @@ func.func @gates(%theta: f64, %phi: f64) {
   qnova.probs %a15, %b5
   return
 }
+
+// The two branches of an if are two paths: each may consume the qubit once (classical feedback, as teleportation's)
+// CHECK-LABEL: func.func @branches
+func.func @branches(%m: i1) {
+  %q = qnova.alloc
+  // CHECK: scf.if
+  %r = scf.if %m -> (!qnova.qubit) {
+    %x = qnova.x %q
+    scf.yield %x : !qnova.qubit
+  } else {
+    scf.yield %q : !qnova.qubit
+  }
+  qnova.probs %r
+  return
+}
