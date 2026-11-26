@@ -4,14 +4,14 @@
 
 | Component | Supported |
 |---|---|
-| Nova Programming Language extension for VS Code | the latest release |
-| The Nova compiler and interpreter (`main`) | yes |
+| Nova Programming Language and Nova Quantum extensions for VS Code | the latest release |
+| The Nova compiler and interpreter, `nova-compile` and `nova-translate` (`main`) | yes |
 | The NovaComp cloud IDE (`main`) | yes |
 
 ## Reporting a vulnerability
 
 Please report security issues **privately**, through GitHub's
-[private vulnerability reporting](https://github.com/parhitmtech/Nova/security/advisories/new). Do not open a public
+[private vulnerability reporting](https://github.com/parhitmtech/NovaQuantum/security/advisories/new). Do not open a public
 issue.
 
 Include what you can of:

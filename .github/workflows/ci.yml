@@ -165,19 +165,27 @@ jobs:
       - run: npm run build
 
   vscode:
-    name: VS Code extension
+    name: VS Code extension (${{ matrix.extension }})
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - extension: nova
+            configuration: language-configuration.json
+          - extension: nova-quantum
+            configuration: openqasm-configuration.json
     defaults:
       run:
-        working-directory: editors/vscode/nova
+        working-directory: editors/vscode/${{ matrix.extension }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: editors/vscode/nova/package-lock.json
+          cache-dependency-path: editors/vscode/${{ matrix.extension }}/package-lock.json
       - run: npm ci
       # The extension ships its own copy of the license; it must stay the repository's
       - run: cmp LICENSE ../../../LICENSE
@@ -185,10 +193,10 @@ jobs:
       - run: npm run package
       - name: Package holds exactly the expected files
         run: |
-          unzip -Z1 nova-*.vsix | sort > files.txt
+          unzip -Z1 ${{ matrix.extension }}-*.vsix | sort > files.txt
           cat files.txt
           for f in extension/package.json extension/LICENSE.txt extension/icon.png extension/readme.md \
-                   extension/changelog.md extension/language-configuration.json; do
+                   extension/changelog.md extension/${{ matrix.configuration }}; do
             grep -qx "$f" files.txt || { echo "::error::$f is missing from the package"; exit 1; }
           done
           if grep -q node_modules files.txt; then echo "::error::node_modules leaked into the package"; exit 1; fi

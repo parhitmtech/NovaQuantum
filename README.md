@@ -556,7 +556,7 @@ server/      Node.js + Express backend: auth, execution, workspace, NovaBot
 frontend/    React + Vite IDE
 examples/    Nova example programs
 docs/        the documents above; docs/assets holds the README's graphics
-editors/     the VS Code extension (editors/vscode/nova)
+editors/     the VS Code extensions: Nova Programming Language (vscode/nova), Nova Quantum (vscode/nova-quantum)
 deploy/      Docker Compose and deploy script for the EC2 host
 tools/       SOL tunnel scripts, syntax migration scripts, the README graphics generator
 ```
@@ -579,5 +579,5 @@ When benchmark numbers change, update them in `tools/readme/make_assets.py` and 
 
 ## 📄 License
 
-Nova is licensed under the [Apache License 2.0](LICENSE). To report a security issue, see
+NovaQuantum is licensed under the [Apache License 2.0](LICENSE). To report a security issue, see
 [SECURITY.md](SECURITY.md).

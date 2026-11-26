@@ -1,0 +1,35 @@
+{
+  "name": "nova-quantum",
+  "displayName": "Nova Quantum",
+  "description": "Quantum programs in Nova and OpenQASM 3, compiled through MLIR for neutral-atom hardware.",
+  "version": "0.1.0",
+  "preview": true,
+  "publisher": "parhitmathur",
+  "license": "Apache-2.0",
+  "icon": "icon.png",
+  "galleryBanner": { "color": "#0e1226", "theme": "dark" },
+  "homepage": "https://github.com/parhitmtech/NovaQuantum#readme",
+  "repository": { "type": "git", "url": "https://github.com/parhitmtech/NovaQuantum.git", "directory": "editors/vscode/nova-quantum" },
+  "bugs": { "url": "https://github.com/parhitmtech/NovaQuantum/issues" },
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Programming Languages"],
+  "keywords": ["quantum", "openqasm", "qasm", "neutral atom", "nova", "mlir", "compiler", "qubit"],
+  "extensionDependencies": ["parhitmathur.nova"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "openqasm",
+        "aliases": ["OpenQASM", "openqasm", "qasm"],
+        "extensions": [".qasm"],
+        "firstLine": "^\\s*OPENQASM\\s",
+        "configuration": "./openqasm-configuration.json"
+      }
+    ]
+  },
+  "scripts": {
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "4.1.0"
+  }
+}
