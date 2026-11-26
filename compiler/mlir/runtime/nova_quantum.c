@@ -27,7 +27,7 @@
 static void fail(const char* message)
 {
     fflush(stdout);
-    fprintf(stderr, "Runtime error: %s\n", message);
+    fprintf(stderr, "nova: runtime error: %s\n", message);
     exit(1);
 }
 

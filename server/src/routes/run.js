@@ -82,7 +82,7 @@ router.post("/run-stream", async (req, res) => {
     let child;
     // A quantum program or an OpenQASM circuit runs through the native compiler (isNativeProgram)
     try {
-      child = spawnCompiler([tmpFile], { cwd: tmpDir, timeoutMs: execTimeout, userId: req.user.userId,
+      child = spawnCompiler([path.basename(tmpFile)], { cwd: tmpDir, timeoutMs: execTimeout, userId: req.user.userId,
                                         native: isNativeProgram(source) });
     }
     catch (err) { cleanupTempFile(tmpFile, tmpDir); return res.status(503).json({ error: err.message }); }

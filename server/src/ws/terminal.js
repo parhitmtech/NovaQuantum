@@ -333,7 +333,7 @@ async function createShellSession(ws, userId) {
       // A quantum program or an OpenQASM circuit runs through the native compiler, which takes none of these flags
       const native = isNativeProgram(source);
       try {
-        proc = spawnCompiler([tmpFile, ...(native ? [] : flags)], { cwd: tmpDir, timeoutMs: MAX_EXECUTION_MS, userId, native });
+        proc = spawnCompiler([path.basename(tmpFile), ...(native ? [] : flags)], { cwd: tmpDir, timeoutMs: MAX_EXECUTION_MS, userId, native });
       }
       catch (err) { cleanupTempFile(tmpFile, tmpDir); send(err.message); resolve(); return; }
       currentProc = proc;

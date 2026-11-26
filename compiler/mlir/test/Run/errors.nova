@@ -9,6 +9,6 @@ ignite:
     # CHECK: 1.000000
     print(a[1, 2])
     Tensor b = ones(3, 2)
-    # CHECK-NEXT: Runtime error at line [[@LINE+1]]: '+' needs tensors of the same shape, got (2, 3) and (3, 2)
+    # CHECK-NEXT: {{.*}}errors.nova:[[@LINE+1]]: runtime error[R0003]: '+' needs tensors of the same shape, got (2, 3) and (3, 2)
     print(a + b)
     print(a)
