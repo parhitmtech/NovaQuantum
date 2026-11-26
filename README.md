@@ -43,6 +43,58 @@ ignite:                           # the entry point
     print(scale(1.5, 2.0))        # 3.000000
 ```
 
+## ⚛️ NovaQuantum: an SSA compiler through MLIR to native code, and to neutral-atom hardware
+
+This repository extends Nova with an MLIR back end, built in C++ on LLVM/MLIR 20.
+
+**Nova to native code.**
+- The checked tree lowers to MLIR in SSA form:
+  - `scf.if` results act as phis, and `scf.while` block arguments carry loop variables;
+  - `break`, `continue` and `return` become flags;
+  - generic functions become one `func.func` per instantiation;
+  - tensors become a custom `nova` dialect, whose ops declare per-value memory effects so MLIR's CSE, LICM and
+    canonicalize optimize it safely.
+- A dialect-conversion pass lowers it through `llvm` to a native executable: `nova-compile prog.nova -o prog`.
+- **Differential testing** runs every program both natively and in the interpreter in CI. All 28 programs that
+  compile natively match the interpreter on stdout, stderr and exit status. It found two real bugs: a tensor
+  `print` that printed a handle, and integer division by zero, which is undefined behavior in LLVM.
+- **Native code is 2–215× faster than the interpreter,** and on par with the same program written in C and compiled
+  by the same clang. Median of 7 runs, process start included (`compiler/mlir/utils/benchmark.py`):
+
+| Benchmark | Interpreter | Nova native | Speedup | Same in C, clang -O2 |
+|---|---|---|---|---|
+| `calls` (naive fib(30), 1.3M calls) | 633 ms | 2.9 ms | 215× | 2.5 ms |
+| `int_loop` (3M iterations) | 159 ms | 1.0 ms | 157× | 2.1 ms (64-bit ints) |
+| `fibonacci` (fib(35)) | 53 ms | 26 ms | 2.1× | 34 ms |
+
+  The interpreter memoizes pure functions automatically, so for fib(35) it skips most of the 30M calls that
+  native code makes.
+
+**Quantum circuits for a neutral-atom machine ([docs/QUANTUM.md](docs/QUANTUM.md)).** A second dialect, `qnova`:
+- Qubits are SSA values. A linearity trait enforces no-cloning in the verifier.
+- Logical gates decompose into the native Raman (`r`, `rz`) and Rydberg (`cz`) gates.
+- Canonicalization cancels and merges gates using SSA def-use: self-inverse pairs, rotation merging, diagonal gates
+  commuting through `cz`, and unobservable diagonal gates dropped.
+- A scheduler places atoms on a grid, routes by **moving atoms** instead of inserting SWAPs, and packs gates into
+  hardware layers under a Rydberg-blockade spacing rule.
+- A statevector simulator in the runtime runs each circuit as written and as compiled, and CI requires identical
+  probabilities.
+
+| Circuit | Qubits | Native gates | Compiled | Saved | Moves | Depth | Compiled = logical |
+|---|---|---|---|---|---|---|---|
+| GHZ | 12 | 57 | 45 | 21% | 7 | 25 | ✓ |
+| QFT, then its inverse | 8 | 764 | 4 | 99% | 0 | 1 | ✓ |
+| random, 120 gates | 8 | 483 | 355 | 27% | 26 | 242 | ✓ |
+| random, 300 gates | 12 | 1026 | 867 | 15% | 72 | 473 | ✓ |
+
+```bash
+cmake -G Ninja -S compiler/mlir -B build/mlir -DMLIR_DIR=/usr/lib/llvm-20/lib/cmake/mlir
+ninja -C build/mlir check-nova                                   # 28 lit tests
+build/mlir/bin/nova-compile compiler/mlir/test/Run/tensors.nova -o t   # Nova to a native executable
+python3 compiler/mlir/utils/qbench.py --build build/mlir         # the quantum table above
+python3 compiler/mlir/utils/difftest.py --build build/mlir --interpreter compiler/build/nova compiler/tests
+```
+
 ## 💡 Why Nova
 
 Python is the language of machine learning, but it's dynamically typed and slow, so the heavy lifting

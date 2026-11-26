@@ -222,9 +222,17 @@ the LICM safety rules, broadcasting through `MatmulPlan`, and the kernel steps. 
   pass removes or moves it. `utils/difftest.py` runs every program both ways in CI: all 28 test and benchmark
   programs that compile natively match the interpreter's stdout, stderr and exit status, and it found two bugs
   (the interpreter's `print(t)` printed a tensor's handle; integer division by zero was undefined natively). Native
-  code is 37–220× faster than the interpreter and within 1.2× of the same program in C (`utils/benchmark.py`).
+  code is 2–215× faster than the interpreter and on par with the same program in C (`utils/benchmark.py`).
   Next: classes, strings and containers through the runtime, and the tensor checks as their own ops.
 - Frames, variable lifetimes and memory (phase 6) come from the dialect's lowering instead of slot ranges.
+
+**Q. Quantum circuits for a neutral-atom machine (NovaQuantum, [QUANTUM.md](QUANTUM.md)).** Done: the `qnova`
+dialect, with qubits as SSA values (linear, verified: no-cloning) and logical and native neutral-atom gates;
+`--qnova-decompose`; canonicalizations (inverse pairs, merged rotations, diagonal gates commuted through `cz` and
+dropped where unobservable); `--qnova-schedule`, which places atoms, routes by moving them, and packs layers under
+the Rydberg blockade; `--qnova-stats`; a statevector simulator in the runtime; and `utils/qbench.py` in CI, which
+checks every benchmark circuit compiled against logical. Next: Nova syntax for circuits, a richer machine model
+(move parallelism, moving atoms back), and a pulse-level lowering.
 
 **D. A tile-level kernel language in Nova.** `kernel` functions that work on blocks of a tensor, as Triton's do:
 a program id, block pointers, masked loads and stores, and a block-level `dot`. They are checked by the check pass

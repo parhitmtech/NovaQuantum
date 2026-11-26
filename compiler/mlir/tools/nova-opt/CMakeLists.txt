@@ -8,6 +8,7 @@ target_link_libraries(nova-opt PRIVATE
     MLIRSCFDialect
     MLIRUBDialect
     NovaConversion
+    MLIRQNova
     MLIROptLib
     MLIRTransforms
 )
