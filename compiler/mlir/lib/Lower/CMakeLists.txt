@@ -10,6 +10,7 @@ add_mlir_library(NovaLower
 
     LINK_LIBS PUBLIC
     MLIRNova
+    MLIRQNova
     MLIRArithDialect
     MLIRFuncDialect
     MLIRSCFDialect

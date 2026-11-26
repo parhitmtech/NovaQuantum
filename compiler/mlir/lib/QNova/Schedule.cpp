@@ -70,6 +70,11 @@ struct Schedule : PassWrapper<Schedule, OperationPass<func::FuncOp>>
         std::vector<AllocOp> allocs;
         f.walk([&](AllocOp a) { allocs.push_back(a); });
         if (allocs.empty()) return;
+        // Only straight-line circuits for now: one with control flow (a gate in an if or a loop, as a program with
+        // classical feedback has) is left unscheduled, its gates decomposed and optimized but not placed in layers
+        bool controlFlow = false;
+        f.walk([&](Operation* op) { controlFlow |= op != f.getOperation() && op->getNumRegions() > 0; });
+        if (controlFlow) return;
         // A w x w grid with about twice as many sites as atoms, as a real array has spare sites to move atoms to
         int64_t n = int64_t(allocs.size());
         int64_t w = width > 0 ? int64_t(width) : std::max<int64_t>(2, int64_t(std::ceil(std::sqrt(2.0 * n))));

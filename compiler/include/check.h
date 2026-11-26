@@ -33,6 +33,7 @@ enum class TypeKind : uint8_t
     Map,
     Struct,
     Class,
+    Qubit,      // one qubit of a quantum circuit: compiled natively only (qpu.*, docs/QUANTUM.md)
 };
 
 struct Type 
@@ -47,7 +48,7 @@ class TypeTable
 {
     public:
         static constexpr TypeId Unknown = 0, Int = 1, Float = 2, Double = 3, Bool = 4, String = 5, Tensor = 6,
-                                Array = 7, None = 8;
+                                Array = 7, None = 8, Qubit = 9;
         
         TypeTable();  // the built-in types, in the order of the ids above
         TypeId intern(Type t);

@@ -1,0 +1,22 @@
+# RUN: not nova-lower %s 2>&1 | FileCheck %s
+#
+# A quantum state cannot be copied (no-cloning), and the check pass says so where Nova code would copy one: a qubit
+# starts from qpu.alloc(), is never assigned, and is passed only to qpu gates, each qubit once per gate.
+
+def f(qubit q):
+    qpu.h(q)
+
+ignite:
+    qubit a = qpu.alloc()
+    # CHECK: Error at line [[@LINE+1]]: qubit 'b' starts from qpu.alloc(), a fresh qubit: a quantum state cannot be copied (no-cloning)
+    qubit b = a
+    # CHECK: Error at line [[@LINE+1]]: a qubit cannot be assigned: a quantum state cannot be copied (no-cloning)
+    a = b
+    # CHECK: Error at line [[@LINE+1]]: 'qpu.cx' is given the same qubit twice
+    qpu.cx(a, a)
+    # CHECK: Error at line [[@LINE+1]]: argument 2 of 'qpu.rx' expects an angle in radians, a number, but got string
+    qpu.rx(a, "x")
+    # CHECK: Error at line [[@LINE+1]]: unknown qpu method: qpu.foo()
+    qpu.foo(a)
+    # CHECK: Error at line [[@LINE+1]]: a qubit cannot be passed to a function yet
+    f(a)

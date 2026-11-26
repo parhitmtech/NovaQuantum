@@ -32,7 +32,7 @@ static void register_keywords()
         {"def", DEF}, {"return", RETURN}, {"else", ELSE},
         {"and", AND}, {"or", OR}, {"not", NOT},
         {"int", INT_TYPE}, {"bool", BOOL_TYPE}, {"string", STRING_TYPE},
-        {"float", FLOAT_TYPE}, {"double", DOUBLE_TYPE}, {"Tensor", TENSOR_TYPE},
+        {"float", FLOAT_TYPE}, {"double", DOUBLE_TYPE}, {"Tensor", TENSOR_TYPE}, {"qubit", QUBIT_TYPE},
         {"true", TRUE}, {"false", FALSE},
         {"struct", STRUCT}, {"class", CLASS}, {"extends", EXTENDS}, {"self", SELF}, {"import", IMPORT},
         {"break", BREAK}, {"continue", CONTINUE},

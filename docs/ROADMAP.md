@@ -231,8 +231,10 @@ dialect, with qubits as SSA values (linear, verified: no-cloning) and logical an
 `--qnova-decompose`; canonicalizations (inverse pairs, merged rotations, diagonal gates commuted through `cz` and
 dropped where unobservable); `--qnova-schedule`, which places atoms, routes by moving them, and packs layers under
 the Rydberg blockade; `--qnova-stats`; a statevector simulator in the runtime; and `utils/qbench.py` in CI, which
-checks every benchmark circuit compiled against logical. Next: Nova syntax for circuits, a richer machine model
-(move parallelism, moving atoms back), and a pulse-level lowering.
+checks every benchmark circuit compiled against logical; and Nova syntax for circuits (`qubit`, `qpu.*` gates, classical
+feedback through `if` and loops), lowered by the same SSA construction as variables, with no-cloning checked in the
+language and, path by path, in the IR. Next: a timed hardware-instruction layer below the native gates, a GPU
+statevector simulator, qubits through functions, and a richer machine model.
 
 **D. A tile-level kernel language in Nova.** `kernel` functions that work on blocks of a tensor, as Triton's do:
 a program id, block pointers, masked loads and stores, and a block-level `dot`. They are checked by the check pass

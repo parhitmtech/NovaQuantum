@@ -18,6 +18,7 @@ add_mlir_dialect_library(MLIRQNova
     MLIRFuncDialect
     MLIRPass
     MLIRSideEffectInterfaces
+    MLIRLoopLikeInterface
     MLIRTransforms
     MLIRTransformUtils
 )

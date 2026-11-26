@@ -1,9 +1,10 @@
 # Compiling quantum circuits for a neutral-atom machine
 
-NovaQuantum adds a second MLIR dialect to Nova's compiler, `qnova`. Its job is to take a quantum circuit written in
-logical gates and compile it for a neutral-atom quantum computer: decompose it into the machine's native gates,
-optimize it, route it by moving atoms, and schedule it into hardware layers. A statevector simulator in the C runtime
-then runs both the circuit as written and the compiled one, and checks that they agree.
+NovaQuantum adds a second MLIR dialect to Nova's compiler, `qnova`. Its job is to take a quantum circuit, written in
+Nova (`qubit`, `qpu.h(q)`, ...) or directly in MLIR, and compile it for a neutral-atom quantum computer: decompose it
+into the machine's native gates, optimize it, route it by moving atoms, and schedule it into hardware layers. A
+statevector simulator in the C runtime then runs both the circuit as written and the compiled one, and checks that
+they agree.
 
 All of it reuses the infrastructure the rest of the compiler is built on: ODS (TableGen) definitions, MLIR's pattern
 rewriting and pass manager, the lowering to LLVM through a C runtime, and lit/FileCheck tests.
@@ -20,6 +21,65 @@ native circuit  ──--convert-nova-to-runtime──▶  calls into the simulat
 
 `nova-compile circuit.mlir -o circuit` runs all of it; `--logical` skips the compilation, so the circuit runs as
 written; `--qnova-stats` prints what the compiled circuit costs.
+
+## Writing circuits in Nova
+
+Circuits are written in Nova itself, in the style Python quantum libraries use: a `qubit` variable, and gates from
+the built-in `qpu` module that change the qubits they are given.
+
+```python
+# Quantum teleportation (examples/quantum/teleport.nova): the state of a moves to c
+ignite:
+    qubit a = qpu.alloc()
+    qubit b = qpu.alloc()
+    qubit c = qpu.alloc()
+    qpu.ry(a, 2.0943951023931953)   # the state to send: |1> with probability 0.75
+    qpu.h(b)
+    qpu.cx(b, c)                     # b and c entangled
+    qpu.cx(a, b)
+    qpu.h(a)
+    bool m1 = qpu.measure(a)
+    bool m2 = qpu.measure(b)
+    if (m2):                         # classical feedback: gates that depend on a measurement
+        qpu.x(c)
+    if (m1):
+        qpu.z(c)
+    qpu.probs(c)                     # |0>: 0.2500  |1>: 0.7500, whatever was measured
+```
+
+`nova-compile examples/quantum/teleport.nova -o teleport` compiles it for the machine and runs it on the simulator.
+The gates are `h x y z s t`, `rx ry rz` (with an angle), `cx cz swap`, and `cp` (with an angle). There are also
+`qpu.alloc()`, `qpu.measure(q)`, which gives a `bool`, and `qpu.probs(a, b, ...)`.
+
+**How the language maps to SSA.** In Nova a gate changes a variable in place; in `qnova` a gate consumes a value and
+produces a new one. The bridge is the SSA construction the compiler already uses for ordinary variables
+([DESIGN.md](DESIGN.md), C7). Lowering keeps, for each variable, the SSA value it holds at this point:
+- an assignment `x = ...` makes a new value for `x`;
+- a gate `qpu.h(q)` makes the new value `%q1 = qnova.h %q0` for `q`.
+
+Because of that, control flow needs nothing new:
+- **Loops.** A loop that applies a gate to `q` carries `q` as an `scf.while` block argument, exactly as it carries a
+  counter.
+- **Ifs.** An `if` that applies a gate carries `q` out as an `scf.if` result, a phi of the wire. Teleportation's
+  corrections lower to two `scf.if` ops with a `!qnova.qubit` result each.
+
+**No-cloning at two levels.**
+- **In the language,** the check pass rejects any Nova code that would copy a quantum state:
+  - a `qubit` that doesn't start from `qpu.alloc()`;
+  - assigning a qubit (`a = b`);
+  - passing a qubit to a function, or returning one (a function gets a copy of a value);
+  - giving one gate the same qubit twice (`qpu.cx(a, a)`).
+
+  Each has its own error message, for example "a quantum state cannot be copied (no-cloning)".
+- **In the IR,** the `LinearQubits` trait verifies that each qubit value is consumed at most once *on every path*.
+  The two branches of an `if` are two paths, so each may consume the qubit. A loop may not consume a qubit from
+  outside it, because it would do so once per iteration. This makes linearity correct in the presence of classical
+  control flow, which the use count that MLIR's `hasOneUse` gives cannot do.
+
+**Where it runs.** A quantum program runs only as native code, on the runtime's simulator. The interpreter stops
+with "quantum operations run only in native code: compile this program with nova-compile". The differential test
+counts such programs as native-only rather than as failures. A circuit with classical control flow is decomposed and
+optimized; the scheduler (below) places only straight-line circuits for now.
 
 ## Qubits as SSA values
 
@@ -155,11 +215,18 @@ prepare its input, because the circuit is a unitary followed by its inverse. Rep
 - `test/QNova/schedule.mlir`: placement, a move, layers and the stats line, all hand-checked.
 - `test/Run/quantum.mlir`: a circuit compiled both ways, run, with the probabilities checked.
 - `test/Run/measure.mlir`: a Bell pair's measured bits agree.
+- `test/Lower/quantum.nova`: Nova's `qubit` and `qpu` gates lowered to qnova, with a qubit carried through a loop and
+  an if.
+- `test/Lower/quantum_errors.nova`: each no-cloning error of the check pass.
+- `test/Run/teleport.nova`: teleportation written in Nova, run with three measurement seeds and as written; the
+  teleported state is the same every time.
+- `test/QNova/ops.mlir` and `invalid.mlir`: an if's two branches may each consume a qubit, but a loop may not
+  consume one from outside it.
 
 ## What would come next
 
-- **Nova syntax for circuits** (`qubit q = alloc()`, `h(q)`), through the existing front end and check pass, so
-  circuits are written in Nova rather than MLIR.
+- **Qubits passed to and returned from functions,** as in-out parameters lowered to extra results, and qubit arrays
+  (`qubit[8] r`) for circuits whose size is a parameter.
 - **A richer machine model:** move parallelism and collision constraints for the tweezer arrays, moving atoms back
   after use, and reusing atoms across a long circuit.
 - **Commutation-aware optimization beyond diagonal gates,** such as Pauli frame tracking and two-qubit block

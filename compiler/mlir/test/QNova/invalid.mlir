@@ -26,3 +26,18 @@ func.func @too_many(%q: !qnova.qubit) {
   qnova.probs %q, %q, %q, %q, %q, %q, %q, %q, %q, %q, %q, %q, %q
   return
 }
+
+// -----
+
+// A loop may not consume a qubit from outside it: it would consume it once per iteration. (Lowering carries a
+// qubit through a loop as a block argument instead.)
+func.func @loop(%n: index) {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  // expected-error @+1 {{'qnova.alloc' op gives a qubit that is used more than once}}
+  %q = qnova.alloc
+  scf.for %i = %c0 to %n step %c1 {
+    %q1 = qnova.h %q
+  }
+  return
+}

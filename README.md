@@ -22,10 +22,10 @@ directions:
   for machine learning. Every program is type-checked before it runs. It is compiled ahead of time: lowered to MLIR
   in SSA form (with a custom tensor dialect) and through LLVM to a native executable. In CI, every compiled program
   must behave exactly as Nova's interpreter does.
-- **Quantum circuits to neutral-atom hardware.** `qnova`, a second dialect, treats qubits as SSA values. Circuits
-  are decomposed into the machine's native gates and optimized. They are routed by **moving atoms** and scheduled
-  into the parallel layers the hardware runs. A statevector simulator checks every compiled circuit against the
-  original.
+- **Quantum circuits to neutral-atom hardware.** Circuits are written in Nova (a `qubit` type, `qpu` gates, classical
+  feedback through `if`) and compile to `qnova`, a second dialect where qubits are SSA values. Circuits are
+  decomposed into the machine's native gates and optimized. They are routed by **moving atoms** and scheduled into
+  the parallel layers the hardware runs. A statevector simulator checks every compiled circuit against the original.
 
 It grows out of [Nova](https://github.com/parhitmtech/Nova), whose full history it carries: the language, its
 interpreter, the CUDA and Triton matmul kernels, and the NovaComp cloud IDE are all here too.
@@ -65,16 +65,44 @@ functions automatically, so for fib(35) it skips most of the 30M calls that nati
 
 ## ⚛️ Quantum circuits for neutral-atom hardware
 
-```mlir
-%a = qnova.alloc
-%b = qnova.alloc
-%a1 = qnova.h %a                 // each gate consumes its qubits and gives new values:
-%a2, %b1 = qnova.cx %a1, %b      // def-use chains are the circuit's wires
-qnova.probs %a2, %b1             // |00>: 0.5000   |11>: 0.5000
+Circuits are written in Nova, with a `qubit` type and gates from the built-in `qpu` module, Python-library style:
+
+```python
+ignite:                                 # quantum teleportation: examples/quantum/teleport.nova
+    qubit a = qpu.alloc()
+    qubit b = qpu.alloc()
+    qubit c = qpu.alloc()
+    qpu.ry(a, 2.0943951023931953)       # the state to send: |1> with probability 0.75
+    qpu.h(b)
+    qpu.cx(b, c)                         # b and c entangled
+    qpu.cx(a, b)
+    qpu.h(a)
+    bool m1 = qpu.measure(a)
+    bool m2 = qpu.measure(b)
+    if (m2):                             # classical feedback
+        qpu.x(c)
+    if (m1):
+        qpu.z(c)
+    qpu.probs(c)                         # |0>: 0.2500  |1>: 0.7500, whatever was measured
 ```
 
-- **Qubits are SSA values.** A `LinearQubits` op trait makes **no-cloning** part of the verifier: each qubit value is
-  used at most once.
+They compile to `qnova`, where each qubit is an SSA value. A gate in Nova changes its qubit variable; the compiler
+turns that into a new SSA value, the same SSA construction it uses for ordinary variables. A loop carries a qubit as
+a block argument, and an `if` carries it out as a result:
+
+```mlir
+%bit, %a1 = qnova.measure %a0
+%c1 = scf.if %bit -> (!qnova.qubit) {   // the corrected qubit: a phi of the circuit's wire
+  %x = qnova.x %c0
+  scf.yield %x : !qnova.qubit
+} else {
+  scf.yield %c0 : !qnova.qubit
+}
+```
+
+- **No-cloning, enforced twice.** The check pass rejects Nova code that would copy a quantum state: assigning a
+  qubit, passing one to a function, or giving one gate the same qubit twice. In the IR, a `LinearQubits` trait
+  verifies that each qubit value is consumed at most once on every path; an `if`'s two branches are two paths.
 - **Native gates of a neutral-atom machine.** `--qnova-decompose` rewrites logical gates (`h`, `cx`, `cp`, `swap`, …)
   into Raman rotations (`r(θ, φ)`, `rz`) and the Rydberg `cz`.
 - **Optimization on SSA def-use.** Self-inverse gates cancel, rotations merge, and diagonal gates commute through
@@ -103,7 +131,7 @@ You need LLVM/MLIR 20 (with `clang-20`), CMake, Ninja and `lit`. On Ubuntu, inst
 git clone https://github.com/parhitmtech/NovaQuantum.git && cd NovaQuantum
 cmake -G Ninja -S compiler/mlir -B build/mlir -DMLIR_DIR=/usr/lib/llvm-20/lib/cmake/mlir \
       -DLLVM_EXTERNAL_LIT=$(command -v lit)
-ninja -C build/mlir check-nova                                        # 28 lit tests
+ninja -C build/mlir check-nova                                        # 31 lit tests
 
 build/mlir/bin/nova-compile compiler/mlir/test/Run/tensors.nova -o t && ./t      # Nova to a native executable
 build/mlir/bin/nova-compile compiler/mlir/test/Run/quantum.mlir --qnova-stats -o q && ./q   # a circuit
