@@ -1,0 +1,8 @@
+# Build outputs of the GPU simulator (make)
+qsim_bench
+dropin_check_cpu
+dropin_check_gpu
+dropin_*.txt
+qsim-*.out
+*.o
+*.a

@@ -16,6 +16,7 @@ target_link_libraries(nova-compile PRIVATE
 target_compile_definitions(nova-compile PRIVATE
     NOVA_CLANG="${LLVM_TOOLS_BINARY_DIR}/clang"
     NOVA_RUNTIME="${CMAKE_BINARY_DIR}/lib/libnova_runtime.a"
+    NOVA_GPU_RUNTIME="${PROJECT_SOURCE_DIR}/runtime/gpu/libnova_runtime_gpu.a"
 )
 add_dependencies(nova-compile nova_runtime)
 mlir_check_all_link_libraries(nova-compile)
