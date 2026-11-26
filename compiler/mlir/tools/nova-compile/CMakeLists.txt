@@ -5,6 +5,8 @@ llvm_update_compile_flags(nova-compile)
 target_link_libraries(nova-compile PRIVATE
     NovaLower
     NovaConversion
+    MLIRQNova
+    MLIRParser
     MLIRPass
     MLIRTargetLLVMIRExport
     MLIRBuiltinToLLVMIRTranslation

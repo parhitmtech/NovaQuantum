@@ -132,6 +132,10 @@ jobs:
         run: >-
           python3 compiler/mlir/utils/difftest.py --build build/mlir --interpreter compiler/build/nova
           compiler/tests compiler/benchmarks compiler/benchmarks/compare compiler/mlir/test/Run
+      # Benchmark circuits compiled for the neutral-atom machine (decompose, optimize, route, schedule) must give the
+      # same probabilities as written, on the runtime's simulator (compiler/mlir/utils/qbench.py)
+      - name: Quantum circuits, compiled against logical, on the simulator
+        run: python3 compiler/mlir/utils/qbench.py --build build/mlir
 
   frontend:
     name: Frontend lint and build

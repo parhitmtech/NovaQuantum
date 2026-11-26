@@ -19,6 +19,7 @@
 #include "Nova/Passes.h"
 
 #include "Nova/NovaOps.h"
+#include "QNova/QNovaOps.h"
 #include "mlir/Conversion/Passes.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -253,6 +254,85 @@ struct PoisonLowering : mlir::OpConversionPattern<mlir::ub::PoisonOp>
     }
 };
 
+// ─── qnova: circuits through the runtime's statevector simulator (runtime/nova_quantum.c) ───
+
+// A qubit is an i32, its index in the simulator. A gate is a call that updates the simulator's state; the qubits it
+// gives are the same indices it was given (qubit operands come first, then any angles), so its results are its
+// first operands: qnova.cz %a, %b is func.call @nova_q_cz(a, b), and its results are a and b.
+template <typename Op>
+struct GateLowering : mlir::OpConversionPattern<Op>
+{
+    GateLowering(const mlir::TypeConverter& converter, mlir::MLIRContext* context, llvm::StringRef name)
+        : mlir::OpConversionPattern<Op>(converter, context), name(name) {}
+    llvm::StringRef name;
+
+    mlir::LogicalResult matchAndRewrite(Op op, typename Op::Adaptor adaptor,
+                                        mlir::ConversionPatternRewriter& rewriter) const override
+    {
+        mlir::ValueRange operands = adaptor.getOperands();
+        call_runtime(rewriter, op, name, {}, operands);
+        rewriter.replaceOp(op, operands.take_front(op->getNumResults()));
+        return mlir::success();
+    }
+};
+
+// %q = qnova.alloc is %q = func.call @nova_q_alloc() : i32, the new qubit's index
+struct AllocLowering : mlir::OpConversionPattern<qnova::AllocOp>
+{
+    using OpConversionPattern::OpConversionPattern;
+    mlir::LogicalResult matchAndRewrite(qnova::AllocOp op, OpAdaptor,
+                                        mlir::ConversionPatternRewriter& rewriter) const override
+    {
+        rewriter.replaceOp(op, call_runtime(rewriter, op, "nova_q_alloc", rewriter.getI32Type(), {}).getResults());
+        return mlir::success();
+    }
+};
+
+// A move carries an atom: it changes no state, so in the simulator it is nothing
+struct MoveLowering : mlir::OpConversionPattern<qnova::MoveOp>
+{
+    using OpConversionPattern::OpConversionPattern;
+    mlir::LogicalResult matchAndRewrite(qnova::MoveOp op, OpAdaptor adaptor,
+                                        mlir::ConversionPatternRewriter& rewriter) const override
+    {
+        rewriter.replaceOp(op, adaptor.getIn());
+        return mlir::success();
+    }
+};
+
+// %bit, %q1 = qnova.measure %q0: the runtime returns the outcome as an i32, truncated to the i1; the qubit is the same
+struct MeasureLowering : mlir::OpConversionPattern<qnova::MeasureOp>
+{
+    using OpConversionPattern::OpConversionPattern;
+    mlir::LogicalResult matchAndRewrite(qnova::MeasureOp op, OpAdaptor adaptor,
+                                        mlir::ConversionPatternRewriter& rewriter) const override
+    {
+        mlir::Value outcome =
+            call_runtime(rewriter, op, "nova_q_measure", rewriter.getI32Type(), adaptor.getIn()).getResult(0);
+        mlir::Value bit = rewriter.create<mlir::arith::TruncIOp>(op.getLoc(), rewriter.getI1Type(), outcome);
+        rewriter.replaceOp(op, {bit, adaptor.getIn()});
+        return mlir::success();
+    }
+};
+
+// qnova.probs %a, %b is func.call @nova_q_probs(2, a, b, 0, ...): how many, then twelve indices
+struct ProbsLowering : mlir::OpConversionPattern<qnova::ProbsOp>
+{
+    using OpConversionPattern::OpConversionPattern;
+    mlir::LogicalResult matchAndRewrite(qnova::ProbsOp op, OpAdaptor adaptor,
+                                        mlir::ConversionPatternRewriter& rewriter) const override
+    {
+        mlir::ValueRange qubits = adaptor.getQubits();
+        llvm::SmallVector<mlir::Value> args{i32(rewriter, op.getLoc(), int32_t(qubits.size()))};
+        args.append(qubits.begin(), qubits.end());
+        mlir::Value zero = i32(rewriter, op.getLoc(), 0);
+        while (args.size() < 13) args.push_back(zero);
+        call_runtime(rewriter, op, "nova_q_probs", {}, args);
+        rewriter.eraseOp(op);
+        return mlir::success();
+    }
+};
+
 // Nova's @main returns nothing; C's main returns an int, the program's exit status. So @main returns 0, from each
 // of its returns. (Not a conversion pattern: it changes a function's type, not an op of the nova dialect.)
 void make_entry(mlir::ModuleOp m)
@@ -296,9 +376,12 @@ struct ConvertNovaToRuntime : mlir::PassWrapper<ConvertNovaToRuntime, mlir::Oper
         converter.addConversion([](nova::TensorType t) -> mlir::Type {
             return mlir::LLVM::LLVMPointerType::get(t.getContext());
         });
+        converter.addConversion([](qnova::QubitType t) -> mlir::Type {  // a qubit is its index in the simulator
+            return mlir::IntegerType::get(t.getContext(), 32);
+        });
 
         mlir::ConversionTarget target(*context);
-        target.addIllegalDialect<nova::NovaDialect>();  // every nova op must go
+        target.addIllegalDialect<nova::NovaDialect, qnova::QNovaDialect>();  // every nova and qnova op must go
         target.addLegalDialect<mlir::arith::ArithDialect, mlir::func::FuncDialect, mlir::scf::SCFDialect,
                                mlir::ub::UBDialect, mlir::LLVM::LLVMDialect>();
         // ... and no tensor type may remain: an op is legal only once its types are converted
@@ -320,6 +403,22 @@ struct ConvertNovaToRuntime : mlir::PassWrapper<ConvertNovaToRuntime, mlir::Oper
         patterns.add<BinaryLowering<nova::DivOp>>(converter, context, "nova_div");
         patterns.add<ScalarLowering<nova::ScaleOp>>(converter, context, "nova_scale");
         patterns.add<ScalarLowering<nova::AddScalarOp>>(converter, context, "nova_add_scalar");
+        // qnova: each gate a call to the simulator, by name
+        patterns.add<AllocLowering, MoveLowering, MeasureLowering, ProbsLowering>(converter, context);
+        patterns.add<GateLowering<qnova::HOp>>(converter, context, "nova_q_h");
+        patterns.add<GateLowering<qnova::XOp>>(converter, context, "nova_q_x");
+        patterns.add<GateLowering<qnova::YOp>>(converter, context, "nova_q_y");
+        patterns.add<GateLowering<qnova::ZOp>>(converter, context, "nova_q_z");
+        patterns.add<GateLowering<qnova::SOp>>(converter, context, "nova_q_s");
+        patterns.add<GateLowering<qnova::TOp>>(converter, context, "nova_q_t");
+        patterns.add<GateLowering<qnova::RxOp>>(converter, context, "nova_q_rx");
+        patterns.add<GateLowering<qnova::RyOp>>(converter, context, "nova_q_ry");
+        patterns.add<GateLowering<qnova::RzOp>>(converter, context, "nova_q_rz");
+        patterns.add<GateLowering<qnova::ROp>>(converter, context, "nova_q_r");
+        patterns.add<GateLowering<qnova::CxOp>>(converter, context, "nova_q_cx");
+        patterns.add<GateLowering<qnova::CzOp>>(converter, context, "nova_q_cz");
+        patterns.add<GateLowering<qnova::CpOp>>(converter, context, "nova_q_cp");
+        patterns.add<GateLowering<qnova::SwapOp>>(converter, context, "nova_q_swap");
         // Signatures, calls, returns, and scf's results and block arguments, with the converter's types
         mlir::populateFunctionOpInterfaceTypeConversionPattern<mlir::func::FuncOp>(patterns, converter);
         mlir::populateCallOpTypeConversionPattern(patterns, converter);

@@ -169,7 +169,8 @@ static int same_shape(const NovaTensor* a, const NovaTensor* b)
 }
 
 // Equal shapes; + and - also take an MxN matrix with a 1xN row on the right (require_elementwise)
-static void require_elementwise(int32_t line, const char* op, const NovaTensor* a, const NovaTensor* b, int rowBroadcast)
+static void require_elementwise(int32_t line, const char* op, const NovaTensor* a, const NovaTensor* b,
+                                int rowBroadcast)
 {
     if (same_shape(a, b)) return;
     if (rowBroadcast && a->rank <= 2 && b->rank <= 2 && a->cols == b->cols && b->rows == 1) return;
