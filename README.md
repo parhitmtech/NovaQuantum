@@ -111,15 +111,24 @@ a block argument, and an `if` carries it out as a result:
 - **Hardware-aware scheduling.** Atoms are placed on a grid. Routing **moves atoms** with optical tweezers instead of
   inserting SWAP gates. Operations are packed into Raman, Rydberg and move layers, with parallel `cz` gates kept
   apart by the blockade radius.
+- **Down to timed hardware instructions.** A third dialect, `atom`, is the machine's instruction stream: loads, Raman
+  pulses and phase shifts on sites, tweezer moves, and *one global Rydberg pulse per layer*, each with its start and
+  duration under a configurable timing model (`nova-compile --hardware`).
 - **Checked on a simulator.** The runtime's statevector simulator runs each circuit as written and as compiled, and
-  CI requires identical probabilities.
+  CI requires identical probabilities. It runs the hardware program too, by site. That check found a scheduler bug
+  in which two atoms collided, invisible at the gate level
+  ([QUANTUM.md](docs/QUANTUM.md#the-hardware-layer-timed-instructions-the-atom-dialect)).
 
-| Circuit | Qubits | Native gates | Compiled | Saved | Moves | Depth | Compiled = logical |
-|---|---|---|---|---|---|---|---|
-| GHZ | 12 | 57 | 45 | 21% | 7 | 25 | ✓ |
-| QFT, then its inverse | 8 | 764 | 4 | **99%** | 0 | 1 | ✓ |
-| random, 120 gates | 8 | 483 | 355 | **27%** | 26 | 242 | ✓ |
-| random, 300 gates | 12 | 1026 | 867 | 15% | 72 | 473 | ✓ |
+| Circuit | Qubits | Native gates | Compiled | Saved | Moves | Layers | Gate time | Move time | = logical |
+|---|---|---|---|---|---|---|---|---|---|
+| GHZ | 12 | 57 | 45 | 21% | 7 | 26 | 10.9 µs | 80.0 µs | ✓ |
+| QFT, then its inverse | 8 | 764 | 4 | **99%** | 0 | 1 | 1.0 µs | 0 | ✓ |
+| random, 120 gates | 8 | 483 | 355 | **27%** | 26 | 244 | 109.5 µs | 725.2 µs | ✓ |
+| random, 300 gates | 12 | 1026 | 867 | 15% | 72 | 496 | 219.3 µs | 1727.4 µs | ✓ |
+
+Gate and move time are those of the hardware program (below), without the final readout: moves take 3–8× as
+long as all the gates, so routing dominates run time on this machine model. "= logical" checks both the native
+circuit and the hardware program.
 
 The design, with the physics behind each rewrite, is in **[docs/QUANTUM.md](docs/QUANTUM.md)**.
 
@@ -131,7 +140,7 @@ You need LLVM/MLIR 20 (with `clang-20`), CMake, Ninja and `lit`. On Ubuntu, inst
 git clone https://github.com/parhitmtech/NovaQuantum.git && cd NovaQuantum
 cmake -G Ninja -S compiler/mlir -B build/mlir -DMLIR_DIR=/usr/lib/llvm-20/lib/cmake/mlir \
       -DLLVM_EXTERNAL_LIT=$(command -v lit)
-ninja -C build/mlir check-nova                                        # 31 lit tests
+ninja -C build/mlir check-nova                                        # 36 lit tests
 
 build/mlir/bin/nova-compile compiler/mlir/test/Run/tensors.nova -o t && ./t      # Nova to a native executable
 build/mlir/bin/nova-compile compiler/mlir/test/Run/quantum.mlir --qnova-stats -o q && ./q   # a circuit
@@ -227,7 +236,7 @@ Write in the browser, run in a sandbox, train on ASU's SOL A100s with `sol.finet
 | **Tensors and ML** | 1–6-dimensional tensors with `+ - * / @`, indexing and slicing, activations, losses, reverse-mode autograd, and `novatorch.nn` / `optim` / `data` in the standard library |
 | **Compiler** | C++17; a lexer, a flat parse tree, a check pass for names and types, and lowering to an IR; optional optimizations (constant folding, copy propagation, dead-code elimination, loop-invariant code motion, inlining); a compiler pass that frees each tensor after its last use; an interpreter, and CUDA source output |
 | **MLIR back end** | The `nova` dialect (TableGen ODS, per-value memory effects), SSA lowering from the checked tree (`scf`, `func`, `arith`), dialect conversion through `llvm` to native executables (`nova-compile`), a C runtime, and differential testing against the interpreter: [docs/DESIGN.md](docs/DESIGN.md), step C |
-| **Quantum** | The `qnova` dialect: qubits as SSA values, decomposition into neutral-atom native gates, canonicalization, routing by moving atoms, layer scheduling, and a statevector simulator: [docs/QUANTUM.md](docs/QUANTUM.md) |
+| **Quantum** | Circuits written in Nova (`qubit`, `qpu.*`); the `qnova` dialect: qubits as SSA values, decomposition into neutral-atom native gates, canonicalization, routing by moving atoms, layer scheduling; the `atom` dialect of timed hardware instructions; and a statevector simulator that checks every level: [docs/QUANTUM.md](docs/QUANTUM.md) |
 | **GPU kernels** | Matmul and batched matmul in CUDA, by hand in four steps up to `cp.async` double buffering (82% of cuBLAS on an A100), and the same in Triton (95% of cuBLAS in FP32, up to 100% with tensor cores), with Triton's IR traced stage by stage: [compiler/kernels](compiler/kernels/) |
 | **IDE** | React + Monaco editor, file workspace, terminal, REPL, step debugger, sharing, and NovaBot (Claude via AWS Bedrock), which can read, write and run code |
 | **Execution** | Each run gets its own network-less, read-only container with CPU, memory, time and process limits |
@@ -520,7 +529,7 @@ The full plan is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ```
 compiler/    the Nova language: C++17 compiler, runtime, stdlib, tests, benchmarks, GPU kernels (kernels/)
-  mlir/      the MLIR back end: the nova and qnova dialects (include/, lib/), nova-lower, nova-opt and
+  mlir/      the MLIR back end: the nova, qnova and atom dialects (include/, lib/), nova-lower, nova-opt and
              nova-compile (tools/), the C runtime and quantum simulator (runtime/), lit tests (test/), and
              difftest.py, benchmark.py and qbench.py (utils/)
 server/      Node.js + Express backend: auth, execution, workspace, NovaBot

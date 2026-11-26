@@ -227,29 +227,32 @@ points:
 - **native:** after `--qnova-decompose` alone;
 - **compiled:** after the whole `--qnova-to-native` pipeline.
 
-It then runs the logical and the compiled circuit on the runtime's statevector simulator and requires the same
-probabilities to four places. CI runs it. Design: [QUANTUM.md](QUANTUM.md).
+It then writes the compiled circuit as the machine's timed instructions, and runs the circuit three ways on the
+runtime's statevector simulator: as written, compiled, and as hardware instructions by site. The last two must give
+the first's probabilities, to four places. CI runs it. Design: [QUANTUM.md](QUANTUM.md).
 
 Default grid (about twice as many sites as atoms):
 
-| Circuit | Qubits | Logical gates | Native | Compiled | Saved | cz | Moves | Depth | Compiled = logical |
-|---|---|---|---|---|---|---|---|---|---|
-| GHZ | 8 | 8 | 37 | 29 | 22% | 7 | 4 | 17 | ✓ |
-| GHZ | 12 | 12 | 57 | 45 | 21% | 11 | 7 | 25 | ✓ |
-| QFT, then its inverse | 5 | 33 | 283 | 3 | 99% | 0 | 0 | 1 | ✓ |
-| QFT, then its inverse | 8 | 76 | 764 | 4 | 99% | 0 | 0 | 1 | ✓ |
-| random | 6 | 60 | 260 | 203 | 22% | 40 | 8 | 140 | ✓ |
-| random | 8 | 120 | 483 | 355 | 27% | 68 | 26 | 242 | ✓ |
-| random | 10 | 200 | 692 | 548 | 21% | 100 | 33 | 312 | ✓ |
-| random | 12 | 300 | 1026 | 867 | 15% | 166 | 72 | 473 | ✓ |
+| Circuit | Qubits | Logical gates | Native | Compiled | Saved | cz | Moves | Layers | Gate time | Move time | Native, hardware = logical |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| GHZ | 8 | 8 | 37 | 29 | 22% | 7 | 4 | 17 | 7.3 µs | 25.0 µs | ✓ ✓ |
+| GHZ | 12 | 12 | 57 | 45 | 21% | 11 | 7 | 26 | 10.9 µs | 80.0 µs | ✓ ✓ |
+| QFT, then its inverse | 5 | 33 | 283 | 3 | 99% | 0 | 0 | 1 | 1.0 µs | 0 | ✓ ✓ |
+| QFT, then its inverse | 8 | 76 | 764 | 4 | 99% | 0 | 0 | 1 | 1.0 µs | 0 | ✓ ✓ |
+| random | 6 | 60 | 260 | 203 | 22% | 40 | 8 | 141 | 64.4 µs | 256.8 µs | ✓ ✓ |
+| random | 8 | 120 | 483 | 355 | 27% | 68 | 26 | 244 | 109.5 µs | 725.2 µs | ✓ ✓ |
+| random | 10 | 200 | 692 | 548 | 21% | 100 | 33 | 314 | 146.5 µs | 714.1 µs | ✓ ✓ |
+| random | 12 | 300 | 1026 | 867 | 15% | 166 | 72 | 496 | 219.3 µs | 1727.4 µs | ✓ ✓ |
+
+Gate time (Raman and Rydberg layers) and move time are the hardware program's (`--qnova-to-atom`, default timing
+model), without the final readout. Moves take 3–8× as long as all the gates together.
 
 A tighter grid, 4 sites wide (`qbench.py --width 4`), changes only the routing:
 
-| Circuit | Moves (default grid) | Moves (width 4) | Depth (default) | Depth (width 4) |
+| Circuit | Moves (default grid) | Moves (width 4) | Layers (default) | Layers (width 4) |
 |---|---|---|---|---|
-| GHZ, 12 qubits | 7 | 7 | 25 | 27 |
-| random, 10 qubits | 33 | 29 | 312 | 311 |
-| random, 12 qubits | 72 | 70 | 473 | 482 |
+| random, 10 qubits | 33 | 29 | 314 | 316 |
+| random, 12 qubits | 72 | 70 | 496 | 509 |
 
 - **"Saved"** is the share of native gates removed by canonicalization: inverse pairs, merged rotations, diagonal
   gates commuted through `cz`, and unobservable diagonal gates dropped.
@@ -259,3 +262,7 @@ A tighter grid, 4 sites wide (`qbench.py --width 4`), changes only the routing:
 - **The first scheduler** placed atoms densely and failed to route the 12-qubit random circuit: every site next to an
   atom was taken. Checkerboard placement on a sparser grid, with two fallbacks (move the other atom; park one atom
   where there is room), routes every circuit here.
+- **Running the hardware instructions found a scheduler bug.** On `random-6x60`, a move into a site was scheduled
+  before the move out of it, so two atoms would have collided (the simulator stopped with "an atom moved onto
+  another"). The gate level could not see it, because qubit values carry no sites. A move now waits for the layer
+  after the move that vacated its site; layer counts went up by 1–23.

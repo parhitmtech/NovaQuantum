@@ -233,8 +233,10 @@ dropped where unobservable); `--qnova-schedule`, which places atoms, routes by m
 the Rydberg blockade; `--qnova-stats`; a statevector simulator in the runtime; and `utils/qbench.py` in CI, which
 checks every benchmark circuit compiled against logical; and Nova syntax for circuits (`qubit`, `qpu.*` gates, classical
 feedback through `if` and loops), lowered by the same SSA construction as variables, with no-cloning checked in the
-language and, path by path, in the IR. Next: a timed hardware-instruction layer below the native gates, a GPU
-statevector simulator, qubits through functions, and a richer machine model.
+language and, path by path, in the IR. Also done: the `atom` dialect of timed hardware instructions
+(`--qnova-to-atom`, `--atom-timing`, `nova-compile --hardware`), run by site on the simulator and checked against the
+logical circuit in CI. Next: a GPU statevector simulator, a move-aware router (moves dominate run time), qubits
+through functions, and a richer machine model.
 
 **D. A tile-level kernel language in Nova.** `kernel` functions that work on blocks of a tensor, as Triton's do:
 a program id, block pointers, masked loads and stores, and a block-level `dot`. They are checked by the check pass

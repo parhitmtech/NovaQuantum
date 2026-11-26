@@ -7,9 +7,11 @@ For each benchmark circuit (circuits.py), --qnova-stats after three points of th
     logical   the circuit as written (h, cx, cp, swap, ...)
     native    after --qnova-decompose: every gate as the machine's r, rz and cz, nothing optimized
     compiled  after --qnova-to-native: decomposed, canonicalized (gates cancelled and merged), routed and scheduled
-Then both the logical circuit and the compiled one are compiled to executables (nova-compile) and run on the
-runtime's statevector simulator: their probability distributions must be the same to four places, or the
-compilation changed what the circuit computes. Exit status 1 if any differs.
+Then the compiled circuit is written as the machine's timed instructions (--qnova-to-atom), whose run time is
+reported without the final readout: gate time (Raman and Rydberg pulses) and move time. Finally the circuit runs
+three ways on the runtime's statevector simulator, as written, compiled, and as hardware instructions; the
+compiled and hardware probability distributions must equal the logical one to four places, or a step changed what
+the circuit computes. Exit status 1 if any differs.
 """
 import argparse
 import os
@@ -50,9 +52,26 @@ def stats(tool, path, passes):
             "depth": int(m[7])}
 
 
-def run(compile_tool, path, exe, logical):
-    subprocess.run([compile_tool, path, "-o", exe] + (["--logical"] if logical else []), check=True)
+def run(compile_tool, path, exe, mode):
+    flags = {"logical": ["--logical"], "native": [], "hardware": ["--hardware"]}[mode]
+    subprocess.run([compile_tool, path, "-o", exe] + flags, check=True)
     return subprocess.run([exe], capture_output=True, text=True, check=True).stdout
+
+
+TIMING = re.compile(r"([\d.]+) us \(raman ([\d.]+) us, rydberg ([\d.]+) us, move ([\d.]+) us, readout ([\d.]+) us\)")
+
+
+def timing(tool, path, schedule):
+    """The hardware program's run time, without the readout: gates (Raman and Rydberg) and moves, in us"""
+    if schedule.startswith("--pass-pipeline="):  # a textual pipeline takes no other pass flags
+        passes = [schedule[:-1] + ",func.func(qnova-to-atom,atom-timing))"]
+    else:
+        passes = [schedule, "--qnova-to-atom", "--atom-timing"]
+    p = subprocess.run([tool, path, *passes, "-o", os.devnull], capture_output=True, text=True)
+    m = TIMING.search(p.stderr)
+    if not m:
+        sys.exit(f"no timing for {path}: {p.stderr}")
+    return float(m[2]) + float(m[3]), float(m[4])
 
 
 def main():
@@ -67,8 +86,8 @@ def main():
         "--pass-pipeline=builtin.module(canonicalize,qnova-decompose,canonicalize,cse,"
         f"func.func(qnova-schedule{{width={args.width}}}))")
 
-    print(f"{'circuit':<17}{'qubits':>7}{'logical':>9}{'native':>8}{'compiled':>10}{'saved':>7}{'cz':>6}"
-          f"{'moves':>7}{'depth':>7}  {'probabilities'}")
+    print(f"{'circuit':<17}{'qubits':>7}{'logical':>8}{'native':>8}{'compiled':>9}{'saved':>7}{'cz':>5}{'moves':>6}"
+          f"{'depth':>6}{'gate us':>9}{'move us':>9}  compiled, hardware")
     failures = 0
     with tempfile.TemporaryDirectory() as tmp:
         for name, make in BENCHMARKS:
@@ -79,13 +98,14 @@ def main():
             logical = stats(opt, path, [])
             native = stats(opt, path, ["--qnova-decompose"])
             compiled = stats(opt, path, [schedule])
-            same = run(compile_tool, path, os.path.join(tmp, "l"), True) == run(compile_tool, path,
-                                                                                   os.path.join(tmp, "n"), False)
-            failures += not same
+            gate_us, move_us = timing(opt, path, schedule)
+            expected = run(compile_tool, path, os.path.join(tmp, "l"), "logical")
+            same = [run(compile_tool, path, os.path.join(tmp, m), m) == expected for m in ("native", "hardware")]
+            failures += not all(same)
             saved = 100 * (native["gates"] - compiled["gates"]) / native["gates"]
-            print(f"{name:<17}{c.n:>7}{logical['gates']:>9}{native['gates']:>8}{compiled['gates']:>10}"
-                  f"{saved:>6.0f}%{compiled['two']:>6}{compiled['moves']:>7}{compiled['depth']:>7}  "
-                  f"{'same' if same else 'DIFFERENT'}")
+            print(f"{name:<17}{c.n:>7}{logical['gates']:>8}{native['gates']:>8}{compiled['gates']:>9}"
+                  f"{saved:>6.0f}%{compiled['two']:>5}{compiled['moves']:>6}{compiled['depth']:>6}"
+                  f"{gate_us:>9.1f}{move_us:>9.1f}  " + ", ".join("same" if s else "DIFFERENT" for s in same))
     return 1 if failures else 0
 
 

@@ -9,6 +9,9 @@
 //   nova-compile prog.nova --emit=llvm-dialect  after --nova-to-llvm
 //   nova-compile prog.nova --emit=llvm-ir       the LLVM IR clang compiles
 //   --qnova-stats                               print each circuit's gates, moves and depth as compiled
+//   --hardware                                  compile a circuit down to the machine's timed instructions (the atom
+//                                               dialect), which the simulator runs by site; with --qnova-stats, it
+//                                               prints their run time too
 //
 // It is nova-lower | nova-opt --nova-to-llvm | mlir-translate --mlir-to-llvmir | clang, without the text in between:
 // the module stays in memory, so every op keeps the Nova line it came from, which the runtime's error messages
@@ -20,6 +23,8 @@
 #include "Nova/Passes.h"
 #include "QNova/QNovaDialect.h"
 #include "QNova/QNovaPasses.h"
+#include "Atom/AtomDialect.h"
+#include "Atom/AtomPasses.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -47,6 +52,7 @@ static cl::opt<std::string> emit("emit", cl::desc("Stop early and print: mlir, l
 static cl::opt<bool> noOptimize("O0", cl::desc("Have clang compile without optimizing"));
 static cl::opt<bool> logical("logical", cl::desc("Run a circuit as written, without compiling it for the machine"));
 static cl::opt<bool> stats("qnova-stats", cl::desc("Print each circuit's gates, moves and depth as compiled"));
+static cl::opt<bool> hardware("hardware", cl::desc("Compile a circuit down to the machine's timed instructions"));
 
 int main(int argc, char** argv)
 {
@@ -55,8 +61,8 @@ int main(int argc, char** argv)
     // A .nova program goes through the front end; a .mlir file (a qnova circuit, or any nova program as MLIR) is
     // parsed as it is
     mlir::DialectRegistry registry;
-    registry.insert<nova::NovaDialect, qnova::QNovaDialect, mlir::arith::ArithDialect, mlir::func::FuncDialect,
-                    mlir::scf::SCFDialect, mlir::ub::UBDialect>();
+    registry.insert<nova::NovaDialect, qnova::QNovaDialect, atom::AtomDialect, mlir::arith::ArithDialect,
+                    mlir::func::FuncDialect, mlir::scf::SCFDialect, mlir::ub::UBDialect>();
     mlir::MLIRContext context(registry);
     std::string error;
     mlir::OwningOpRef<mlir::ModuleOp> module;
@@ -79,6 +85,11 @@ int main(int argc, char** argv)
     mlir::PassManager native(&context, mlir::ModuleOp::getOperationName());
     if (!logical) qnova::buildToNativePipeline(native);
     if (stats) native.addNestedPass<mlir::func::FuncOp>(qnova::createStatsPass());
+    if (hardware && !logical)
+    {
+        native.addNestedPass<mlir::func::FuncOp>(atom::createQNovaToAtomPass());
+        if (stats) native.addNestedPass<mlir::func::FuncOp>(atom::createTimingPass());
+    }
     if (mlir::failed(native.run(*module)))
     {
         llvm::errs() << "Error: compiling the circuit failed\n";

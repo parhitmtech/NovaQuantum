@@ -177,9 +177,13 @@ struct Schedule : PassWrapper<Schedule, OperationPass<func::FuncOp>>
             }
         }
 
-        // 3. Scheduling into layers
+        // 3. Scheduling into layers. Data dependence is SSA def-use; but routing chose each move's site in program
+        // order, when the site was free because another atom had moved out of it, and that is a dependence too: on
+        // the site, a resource no SSA value carries. So a move to a site waits for the layer after the move that left
+        // it, or the two atoms would meet. (Running the timed instructions by site on the simulator found this.)
         std::vector<Layer> layers;
         llvm::DenseMap<Operation*, int64_t> layerOf;
+        std::map<Site, int64_t> vacated;  // the layer of the last move out of each site
         f.walk([&](Operation* op) {
             std::optional<Kind> kind;
             if (isa<ROp, RzOp, HOp, XOp, YOp, ZOp, SOp, TOp, RxOp, RyOp>(op)) kind = Kind::Raman;
@@ -191,6 +195,12 @@ struct Schedule : PassWrapper<Schedule, OperationPass<func::FuncOp>>
             for (Value v : op->getOperands())
                 if (Operation* def = v.getDefiningOp(); def && layerOf.count(def))
                     earliest = std::max(earliest, layerOf[def] + 1);
+            auto move = dyn_cast<MoveOp>(op);
+            if (move)
+            {
+                auto left = vacated.find({move.getTo()[0], move.getTo()[1]});
+                if (left != vacated.end()) earliest = std::max(earliest, left->second + 1);
+            }
             std::pair<Site, Site> pair;
             if (*kind == Kind::Rydberg) pair = {site.lookup(op->getOperand(0)), site.lookup(op->getOperand(1))};
             auto fits = [&](const Layer& l) {
@@ -205,6 +215,7 @@ struct Schedule : PassWrapper<Schedule, OperationPass<func::FuncOp>>
             while (at < int64_t(layers.size()) && !fits(layers[at])) at++;
             if (at == int64_t(layers.size())) layers.push_back(Layer{*kind, {}});
             if (*kind == Kind::Rydberg) layers[at].pairs.push_back(pair);
+            if (move) vacated[site.lookup(move.getIn())] = at;
             layerOf[op] = at;
             op->setAttr("layer", b.getI64IntegerAttr(at));
         });

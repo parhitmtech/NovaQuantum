@@ -394,8 +394,13 @@ Full record: [QUANTUM.md](QUANTUM.md).
 - **Routing moves atoms instead of inserting SWAPs**, which is the defining capability of neutral-atom hardware.
   Placement is a checkerboard on a sparse grid. Scheduling packs ops into single-kind layers, with parallel `cz`
   kept apart by the blockade radius.
+- **A third layer, `atom`, holds the hardware instructions.** They name sites instead of qubit values and carry start
+  times and durations. A layer's `cz` gates become one global Rydberg pulse. The timing model's parameters are pass
+  options.
 - **Every compiled circuit is checked against its logical form on a statevector simulator,** in CI: the same
-  differential idea as C13.
+  differential idea as C13. The simulator runs the hardware program by site as well. That check caught a dependence the
+  scheduler missed: a site is a resource that no SSA value carries, so a move into a site must wait for the move
+  out of it.
 
 ## Still open
 
