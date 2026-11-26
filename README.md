@@ -269,6 +269,7 @@ You need `make`, a C++17 compiler (g++ or clang++) and Node.js 22.12+.
 git clone https://github.com/parhitmtech/NovaQuantum.git && cd NovaQuantum
 make -C compiler                      # builds compiler/build/nova
 make -C compiler test                 # the golden language tests
+make -C compiler lsp                  # builds compiler/build/nova-lsp, the language server editors run
 
 export NOVA_HOME=$PWD/compiler        # where `orbit` finds the standard library
 compiler/build/nova examples/xor.nova # trains a 2-layer network on XOR
@@ -558,6 +559,7 @@ compiler/    the Nova language: C++17 compiler, runtime, stdlib, tests, benchmar
   mlir/      the MLIR back end: the nova, qnova and atom dialects (include/, lib/), nova-lower, nova-opt and
              nova-compile (tools/), the C runtime and quantum simulator (runtime/), lit tests (test/), and
              difftest.py, benchmark.py and qbench.py (utils/)
+  lsp/       nova-lsp, the language server editors run (server.cc, analysis.cc), and its protocol tests
 server/      Node.js + Express backend: auth, execution, workspace, NovaBot
 frontend/    React + Vite IDE
 examples/    Nova example programs
