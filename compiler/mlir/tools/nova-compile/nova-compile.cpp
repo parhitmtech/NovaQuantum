@@ -27,6 +27,7 @@
 #include <string>
 
 #include "Nova/LowerTree.h"
+#include "diagnostics.h"
 #include "Nova/NovaDialect.h"
 #include "Nova/Passes.h"
 #include "QNova/QNovaDialect.h"
@@ -36,6 +37,7 @@
 #include "Atom/AtomPasses.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/UB/IR/UBOps.h"
 #include "mlir/Parser/Parser.h"
@@ -91,7 +93,7 @@ int main(int argc, char** argv)
         auto buffer = llvm::MemoryBuffer::getFile(input);
         if (!buffer)
         {
-            llvm::errs() << "Error: cannot open '" << input << "'\n";
+            llvm::errs() << "nova-compile: error: cannot open '" << input << "'\n";
             return 1;
         }
         module = qasm::importOpenQASM((*buffer)->getBuffer(), input, &context);
@@ -99,10 +101,13 @@ int main(int argc, char** argv)
     }
     else
     {
+        diagnostics.set_warnings(false);
+        diagnostics.set_output(false, stderr_supports_color());
         module = nova::lower_file(context, input, error);
         if (!module)
         {
-            llvm::errs() << error << "\n";
+            if (!diagnostics.all().empty()) diagnostics.print(stderr);
+            else llvm::errs() << "nova-compile: error: " << error << "\n";
             return 1;
         }
     }
@@ -118,7 +123,7 @@ int main(int argc, char** argv)
     }
     if (mlir::failed(native.run(*module)))
     {
-        llvm::errs() << "Error: compiling the circuit failed\n";
+        llvm::errs() << "nova-compile: error: compiling the circuit failed\n";
         return 1;
     }
     if (emit == "mlir")
@@ -133,13 +138,39 @@ int main(int argc, char** argv)
     nova::buildNovaToLLVMPipeline(pm);
     if (mlir::failed(pm.run(*module)))
     {
-        llvm::errs() << "Error: lowering to LLVM failed\n";
+        llvm::errs() << "nova-compile: error: lowering to LLVM failed\n";
         return 1;
     }
     if (emit == "llvm-dialect")
     {
         module->print(llvm::outs());
         return 0;
+    }
+
+    // A runtime error names the file, as the interpreter's does: main's first act is to tell the runtime which file
+    // it was compiled from (nova_set_source_file). Executables and --run both take this path.
+    if (llvm::StringRef(input).ends_with(".nova") || llvm::StringRef(input).ends_with(".csl"))
+    {
+        auto main = module->lookupSymbol<mlir::LLVM::LLVMFuncOp>("main");
+        if (main && !main.getBody().empty())
+        {
+            mlir::Location loc = main.getLoc();
+            mlir::MLIRContext* ctx = &context;
+            auto ptr = mlir::LLVM::LLVMPointerType::get(ctx);
+            std::string path = input;
+            mlir::OpBuilder top = mlir::OpBuilder::atBlockEnd(module->getBody());
+            auto text = mlir::LLVM::LLVMArrayType::get(mlir::IntegerType::get(ctx, 8), path.size() + 1);
+            top.create<mlir::LLVM::GlobalOp>(loc, text, /*isConstant=*/true, mlir::LLVM::Linkage::Internal,
+                                             "nova_source_file_name", top.getStringAttr(path + std::string(1, '\0')));
+            if (!module->lookupSymbol("nova_set_source_file"))
+            {
+                auto type = mlir::LLVM::LLVMFunctionType::get(mlir::LLVM::LLVMVoidType::get(ctx), {ptr});
+                top.create<mlir::LLVM::LLVMFuncOp>(loc, "nova_set_source_file", type);
+            }
+            mlir::OpBuilder entry(&main.getBody().front(), main.getBody().front().begin());
+            mlir::Value name = entry.create<mlir::LLVM::AddressOfOp>(loc, ptr, "nova_source_file_name");
+            entry.create<mlir::LLVM::CallOp>(loc, mlir::TypeRange{}, "nova_set_source_file", mlir::ValueRange{name});
+        }
     }
 
     // The llvm dialect to LLVM IR, as mlir-translate --mlir-to-llvmir does
@@ -159,14 +190,14 @@ int main(int argc, char** argv)
         auto engine = mlir::ExecutionEngine::create(*module, options);
         if (!engine)
         {
-            llvm::errs() << "Error: compiling to machine code failed: " << llvm::toString(engine.takeError()) << "\n";
+            llvm::errs() << "nova-compile: error: compiling to machine code failed: " << llvm::toString(engine.takeError()) << "\n";
             return 1;
         }
         int32_t status = 0;
         llvm::SmallVector<void*> packed{&status};  // the packed wrapper's arguments: main has none, then its result
         if (llvm::Error e = (*engine)->invokePacked("main", packed))
         {
-            llvm::errs() << "Error: running main failed: " << llvm::toString(std::move(e)) << "\n";
+            llvm::errs() << "nova-compile: error: running main failed: " << llvm::toString(std::move(e)) << "\n";
             return 1;
         }
         fflush(stdout);
@@ -176,7 +207,7 @@ int main(int argc, char** argv)
     std::unique_ptr<llvm::Module> ir = mlir::translateModuleToLLVMIR(*module, llvmContext, input);
     if (!ir)
     {
-        llvm::errs() << "Error: translating to LLVM IR failed\n";
+        llvm::errs() << "nova-compile: error: translating to LLVM IR failed\n";
         return 1;
     }
     if (emit == "llvm-ir")
@@ -186,7 +217,7 @@ int main(int argc, char** argv)
     }
     if (!emit.empty())
     {
-        llvm::errs() << "Error: --emit takes mlir, llvm-dialect or llvm-ir\n";
+        llvm::errs() << "nova-compile: error: --emit takes mlir, llvm-dialect or llvm-ir\n";
         return 1;
     }
 
@@ -197,7 +228,7 @@ int main(int argc, char** argv)
         llvm::raw_fd_ostream file(ll, ec, llvm::sys::fs::OF_Text);
         if (ec)
         {
-            llvm::errs() << "Error: cannot write '" << ll << "': " << ec.message() << "\n";
+            llvm::errs() << "nova-compile: error: cannot write '" << ll << "': " << ec.message() << "\n";
             return 1;
         }
         ir->print(file, nullptr);
@@ -223,7 +254,7 @@ int main(int argc, char** argv)
     llvm::sys::fs::remove(ll);
     if (status != 0)
     {
-        llvm::errs() << "Error: clang failed" << (message.empty() ? "" : ": " + message) << "\n";
+        llvm::errs() << "nova-compile: error: clang failed" << (message.empty() ? "" : ": " + message) << "\n";
         return 1;
     }
     return 0;

@@ -37,11 +37,18 @@ void nova_print_f64(double x) { printf("%lf\n", x); }
 
 // ─── Errors ─────────────────────────────────────────────────────────────────
 
-// A runtime error stops the program with the Nova line, as the interpreter's tensor_shape_error does
-static void nova_error(int32_t line, const char* message)
+// A runtime error stops the program with the file and the Nova line and the code the interpreter reports
+// (docs/ERRORS.md): "program.nova:4: runtime error[R0001]: integer division by zero". The compiled main tells the
+// runtime its file first (nova-compile adds the call).
+static const char* nova_file = 0;
+
+void nova_set_source_file(const char* file) { nova_file = file; }
+
+static void nova_error(int32_t line, const char* code, const char* message)
 {
     fflush(stdout);
-    fprintf(stderr, "Runtime error at line %d: %s\n", line, message);
+    if (nova_file) fprintf(stderr, "%s:%d: runtime error[%s]: %s\n", nova_file, line, code, message);
+    else fprintf(stderr, "line %d: runtime error[%s]: %s\n", line, code, message);
     exit(1);
 }
 
@@ -58,7 +65,7 @@ static void shape_text(const NovaTensor* t, char* out, size_t n)
 // undefined
 void nova_check_divisor(int32_t line, int32_t divisor)
 {
-    if (divisor == 0) nova_error(line, "integer division by zero");
+    if (divisor == 0) nova_error(line, "R0001", "integer division by zero");
 }
 
 // ─── Making tensors ─────────────────────────────────────────────────────────
@@ -98,7 +105,7 @@ static NovaTensor* filled(int32_t line, int32_t rank, int64_t d0, int64_t d1, in
         {
             char message[64];
             snprintf(message, sizeof message, "negative dimension %lld", (long long)shape[k]);
-            nova_error(line, message);
+            nova_error(line, "R0004", message);
         }
     }
     NovaTensor* t = allocate(rank, shape);
@@ -128,7 +135,7 @@ static int64_t offset(int32_t line, const char* op, const NovaTensor* t, int32_t
     if (n != t->rank)
     {
         snprintf(message, sizeof message, "%s: a rank-%d tensor needs %d indices, got %d", op, t->rank, t->rank, n);
-        nova_error(line, message);
+        nova_error(line, "R0002", message);
     }
     int64_t off = 0;
     for (int32_t k = 0; k < n; k++)
@@ -137,7 +144,7 @@ static int64_t offset(int32_t line, const char* op, const NovaTensor* t, int32_t
         {
             snprintf(message, sizeof message, "%s: index %lld out of range for dimension %d (size %lld)", op,
                      (long long)idx[k], k, (long long)t->shape[k]);
-            nova_error(line, message);
+            nova_error(line, "R0002", message);
         }
         off += idx[k] * t->strides[k];
     }
@@ -178,7 +185,7 @@ static void require_elementwise(int32_t line, const char* op, const NovaTensor* 
     shape_text(a, as, sizeof as);
     shape_text(b, bs, sizeof bs);
     snprintf(message, sizeof message, "'%s' needs tensors of the same shape, got %s and %s", op, as, bs);
-    nova_error(line, message);
+    nova_error(line, "R0003", message);
 }
 
 NovaTensor* nova_add(int32_t line, NovaTensor* a, NovaTensor* b)
@@ -260,7 +267,7 @@ NovaTensor* nova_matmul(int32_t line, NovaTensor* a, NovaTensor* b)
         {
             snprintf(message, sizeof message, "matmul: inner dimensions differ (%lld vs %lld)", (long long)a->cols,
                      (long long)b->rows);
-            nova_error(line, message);
+            nova_error(line, "R0003", message);
         }
         n = a->rows;
         k = a->cols;
@@ -279,7 +286,7 @@ NovaTensor* nova_matmul(int32_t line, NovaTensor* a, NovaTensor* b)
     }
     else
     {
-        if (a->rank < 2) nova_error(line, "matmul: a batched matmul needs a left side of rank 2 or more (got rank 1)");
+        if (a->rank < 2) nova_error(line, "R0003", "matmul: a batched matmul needs a left side of rank 2 or more (got rank 1)");
         int32_t aBatch = a->rank - 2, bBatch = b->rank - 2;
         batch = aBatch > bBatch ? aBatch : bBatch;
         for (int32_t d = 0; d < batch; d++) aDims[d] = bDims[d] = 1;  // lined up from the right
@@ -291,7 +298,7 @@ NovaTensor* nova_matmul(int32_t line, NovaTensor* a, NovaTensor* b)
             {
                 snprintf(message, sizeof message, "matmul: batch dimension %d differs (%lld vs %lld)", d,
                          (long long)aDims[d], (long long)bDims[d]);
-                nova_error(line, message);
+                nova_error(line, "R0003", message);
             }
             out[d] = aDims[d] > bDims[d] ? aDims[d] : bDims[d];
             batches *= out[d];
@@ -301,7 +308,7 @@ NovaTensor* nova_matmul(int32_t line, NovaTensor* a, NovaTensor* b)
         {
             snprintf(message, sizeof message, "matmul: inner dimensions differ (%lld vs %lld)", (long long)a->cols,
                      (long long)inner);
-            nova_error(line, message);
+            nova_error(line, "R0003", message);
         }
         n = a->shape[a->rank - 2];
         k = a->cols;

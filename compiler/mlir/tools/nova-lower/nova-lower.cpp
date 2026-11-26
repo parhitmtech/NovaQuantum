@@ -4,6 +4,8 @@
 // --mlir-print-debuginfo writes each op's Nova line, which a later tool reading the text then keeps.
 #include <string>
 
+#include "diagnostics.h"
+
 #include "Nova/LowerTree.h"
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/MLIRContext.h"
@@ -18,12 +20,15 @@ int main(int argc, char** argv)
     mlir::registerMLIRContextCLOptions();
     llvm::cl::ParseCommandLineOptions(argc, argv, "nova-lower: a Nova program as MLIR\n");
 
+    diagnostics.set_warnings(false);
+    diagnostics.set_output(false, stderr_supports_color());
     mlir::MLIRContext context;
     std::string error;
     mlir::OwningOpRef<mlir::ModuleOp> module = nova::lower_file(context, input, error);
     if (!module)
     {
-        llvm::errs() << error << "\n";
+        if (!diagnostics.all().empty()) diagnostics.print(stderr);
+        else llvm::errs() << "nova-lower: error: " << error << "\n";
         return 1;
     }
     module->print(llvm::outs(), mlir::OpPrintingFlags());  // the flags from the command line apply

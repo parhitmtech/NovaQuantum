@@ -12,6 +12,6 @@ ignite:
     # CHECK-NEXT: 0
     print(min % m)
     int zero = 0
-    # CHECK-NEXT: Runtime error at line [[@LINE+1]]: integer division by zero
+    # CHECK-NEXT: {{.*}}divide_by_zero.nova:[[@LINE+1]]: runtime error[R0001]: integer division by zero
     print(7 / zero)
     print(1)

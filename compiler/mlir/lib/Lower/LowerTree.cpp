@@ -47,6 +47,7 @@
 #include <string>
 
 #include "check.h"  // the front end: the parse tree and the check pass's result
+#include "diagnostics.h"
 #include "lexer.h"  // token kinds
 
 #include "Nova/NovaOps.h"
@@ -147,14 +148,19 @@ class Lowerer
 
 mlir::Value Lowerer::fail(uint32_t n, const std::string& what)
 {
-    if (ok()) error = "Error at line " + std::to_string(tree.token(n).line) + ": nova-lower cannot lower " + what + " yet";
+    if (ok())
+    {
+        error = "nova-lower cannot lower " + what + " yet";
+        report_node(tree, n, DiagCode::NotLowered, error);
+    }
     return nullptr;
 }
 
 // Every op records the Nova line it came from: MLIR's errors cite it, and --mlir-print-debuginfo prints it
 mlir::Location Lowerer::loc(uint32_t n)
 {
-    return mlir::FileLineColLoc::get(builder.getContext(), file, tree.token(n).line, 1);
+    PresumedLoc p = sourceManager.presumed(tree.token(n).loc);
+    return mlir::FileLineColLoc::get(builder.getContext(), file, tree.token(n).line, p.column > 0 ? p.column : 1);
 }
 
 // Nova's types as MLIR's builtin ones (docs/DESIGN.md, C2): int is i32, as the interpreter's int is
@@ -1142,28 +1148,24 @@ mlir::OwningOpRef<mlir::ModuleOp> nova::lower_to_mlir(mlir::MLIRContext& context
 mlir::OwningOpRef<mlir::ModuleOp> nova::lower_file(mlir::MLIRContext& context, const std::string& path,
                                                    std::string& error)
 {
-    std::ifstream file(path);
+    std::ifstream file(path, std::ios::binary);
     if (!file)
     {
-        error = "Error: cannot open '" + path + "'";
+        error = "cannot open '" + path + "'";
+        diagnostics.report_at(DiagCode::FileNotFound, path, 0, error);
         return nullptr;
     }
     std::stringstream source;
     source << file.rdbuf();
 
-    std::vector<LexToken> tokens = scan_program(source.str());
+    // Errors go to the diagnostics engine (the caller prints them); a run with errors stops before lowering
+    std::vector<LexToken> tokens = scan_program(source.str(), path);
     ParseTree tree = build_parse_tree(tokens);
-    std::vector<std::string> errors = tree.errors;
     CheckResult checked;
-    if (errors.empty())
+    if (!diagnostics.has_errors()) checked = check_tree(tree);
+    if (diagnostics.has_errors())
     {
-        checked = check_tree(tree);
-        errors = checked.errors;
-    }
-    if (!errors.empty())
-    {
-        error.clear();
-        for (const std::string& e : errors) error += (error.empty() ? "" : "\n") + e;
+        error = "the program has errors";
         return nullptr;
     }
 
@@ -1176,7 +1178,7 @@ mlir::OwningOpRef<mlir::ModuleOp> nova::lower_file(mlir::MLIRContext& context, c
     // in LowerTree.cpp, not in the program.
     if (mlir::failed(mlir::verify(*module)))
     {
-        error = "Error: lowering made invalid MLIR (a bug in nova-lower)";
+        error = "lowering made invalid MLIR (a bug in nova-lower)";
         return nullptr;
     }
     return module;

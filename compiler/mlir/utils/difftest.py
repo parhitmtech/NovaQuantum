@@ -5,8 +5,9 @@
 
 For each .nova file (or each in a directory), nova-compile builds a native executable through MLIR and LLVM, and
 both it and the interpreter run with the program's .input file (if any) on stdin. Their stdout, stderr and exit
-status must match exactly: the runtime prints and fails as the interpreter does, so any difference is a bug in one
-of the two lowerings.
+status must match: the runtime prints and fails as the interpreter does, so any difference is a bug in one of the
+two lowerings. A runtime error matches when both report the same line, code and message: the interpreter also shows
+the column, the source line and the calls that led there, which the native runtime does not.
 
 A program nova-compile does not lower yet (strings, classes, containers, ...) is counted, with the reason, but is
 not a failure: the report says how much of the language the native path covers. A program the front end rejects is
@@ -20,6 +21,29 @@ import re
 import subprocess
 import sys
 import tempfile
+
+
+# A runtime error's header, "file:line[:column]: runtime error[R0001]: message" (or "line N: ..." from a native
+# program that does not know its file): (line, code, message), or None
+RUNTIME_ERROR = re.compile(r"^(?:.*?:|line )(\d+)(?::\d+)?: runtime error\[(R\d+)\]: (.*)$")
+
+
+def runtime_error(stderr):
+    for line in stderr.decode("utf-8", errors="replace").splitlines():
+        m = RUNTIME_ERROR.match(line)
+        if m:
+            return m.groups()
+    return None
+
+
+def same(native, interp):
+    """The same exit status and output, and the same error: the same runtime error, or the same stderr"""
+    if native[0] != interp[0] or native[1] != interp[1]:
+        return False
+    a, b = runtime_error(native[2]), runtime_error(interp[2])
+    if a or b:
+        return a == b
+    return native[2] == interp[2]
 
 
 def run(cmd, stdin_path, timeout):
@@ -88,7 +112,7 @@ def main():
                 if args.verbose:
                     print(f"  native only   {os.path.basename(src)}")
                 continue
-            if native == interp:
+            if same(native, interp):
                 match.append(src)
                 if args.verbose:
                     print(f"  same          {os.path.basename(src)}")

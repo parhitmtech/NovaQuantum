@@ -28,7 +28,7 @@ double* d_scratch = nullptr;  // the reductions' results: 4096 doubles
 void check(cudaError_t e, const char* what)
 {
     if (e == cudaSuccess) return;
-    fprintf(stderr, "Runtime error: CUDA %s: %s\n", what, cudaGetErrorString(e));
+    fprintf(stderr, "nova: runtime error: CUDA %s: %s\n", what, cudaGetErrorString(e));
     exit(1);
 }
 
@@ -111,7 +111,7 @@ namespace nova_gpu
 {
 int32_t alloc()
 {
-    if (n_qubits == MaxQubits) fprintf(stderr, "Runtime error: more qubits than the GPU simulator holds\n"), exit(1);
+    if (n_qubits == MaxQubits) fprintf(stderr, "nova: runtime error: more qubits than the GPU simulator holds\n"), exit(1);
     size_t size = size_t(1) << n_qubits;
     cuDoubleComplex* grown = nullptr;
     check(cudaMalloc(&grown, 2 * size * sizeof(cuDoubleComplex)), "allocating the state");
