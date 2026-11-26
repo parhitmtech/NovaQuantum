@@ -27,6 +27,10 @@ directions:
   decomposed into the machine's native gates and optimized. They are routed by **moving atoms** and scheduled into
   the parallel layers the hardware runs. A statevector simulator checks every compiled circuit against the original.
 
+Both run in the browser: the **NovaComp cloud IDE** sends quantum programs and OpenQASM circuits to
+`nova-compile --run`, which compiles them through MLIR and LLVM in memory (LLVM's JIT) inside a locked-down
+sandbox and shows the results with the circuit's gate counts and hardware timing.
+
 It grows out of [Nova](https://github.com/parhitmtech/Nova), whose full history it carries: the language, its
 interpreter, the CUDA and Triton matmul kernels, and the NovaComp cloud IDE are all here too.
 
@@ -158,6 +162,8 @@ ninja -C build/mlir check-nova                                        # 42 lit t
 build/mlir/bin/nova-compile compiler/mlir/test/Run/tensors.nova -o t && ./t      # Nova to a native executable
 build/mlir/bin/nova-compile compiler/mlir/test/Run/quantum.mlir --qnova-stats -o q && ./q   # a circuit
 build/mlir/bin/nova-opt compiler/mlir/test/Run/quantum.mlir --qnova-to-native     # see the compiled circuit
+build/mlir/bin/nova-compile examples/quantum/teleport.nova --run --qnova-stats    # JIT: compile in memory and run
+build/mlir/bin/nova-compile examples/quantum/ghz.qasm --run --hardware --qnova-stats  # OpenQASM, timed
 
 make -C compiler                                                      # the interpreter, for the checks below
 python3 compiler/mlir/utils/difftest.py --build build/mlir --interpreter compiler/build/nova compiler/tests
@@ -294,7 +300,7 @@ flowchart LR
     subgraph ec2["AWS EC2"]
         direction TB
         server["<b>Server container</b><br/>Node.js · Express · JWT"]
-        workers["<b>Worker containers</b><br/>the Nova compiler, one per job<br/>no network · read-only<br/>CPU / memory / time caps"]
+        workers["<b>Worker containers</b>, one per job<br/>Nova's interpreter, or nova-compile --run<br/>(MLIR + LLVM JIT) for quantum and OpenQASM<br/>no network · read-only<br/>CPU / memory / time caps"]
         server -- "docker run" --> workers
     end
 
