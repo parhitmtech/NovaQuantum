@@ -18,9 +18,10 @@
 **NovaQuantum** is an SSA-based compiler built from scratch in C++ on MLIR and LLVM. It compiles in two
 directions:
 
-- **Nova programs to native code.** Nova is a statically typed, Python-like language for machine learning. Its
-  programs lower to MLIR in SSA form, through a custom tensor dialect, and through LLVM to native executables. In
-  CI, every compiled program must behave exactly as the interpreter does.
+- **Nova programs to native code.** Nova is a **compiled, statically typed language with Python's syntax**, built
+  for machine learning. Every program is type-checked before it runs. It is compiled ahead of time: lowered to MLIR
+  in SSA form (with a custom tensor dialect) and through LLVM to a native executable. In CI, every compiled program
+  must behave exactly as Nova's interpreter does.
 - **Quantum circuits to neutral-atom hardware.** `qnova`, a second dialect, treats qubits as SSA values. Circuits
   are decomposed into the machine's native gates and optimized. They are routed by **moving atoms** and scheduled
   into the parallel layers the hardware runs. A statevector simulator checks every compiled circuit against the
@@ -117,10 +118,23 @@ python3 compiler/mlir/utils/benchmark.py --build build/mlir --interpreter compil
 
 ## 📜 The Nova language
 
-**Nova** is a statically typed programming language for machine learning, with Python-style layout and
-tensors, autograd and GPU-cluster training built into the language. **NovaComp** is the cloud IDE around
-it: a browser editor that compiles and runs Nova in sandboxed containers, streams the output back, and
-includes an AI coding assistant.
+**Nova** is a compiled, statically typed programming language for machine learning. It reads like Python, with
+tensors, autograd and GPU-cluster training built into the language. **NovaComp** is the cloud IDE around it: a
+browser editor that compiles and runs Nova in sandboxed containers, streams the output back, and includes an AI
+coding assistant.
+
+| | |
+|---|---|
+| **Syntax** | Python's layout: indentation, `def`, `class`, `if` / `elif` / `else`, `while`, `for`, `switch`. An `ignite:` block is the entry point. |
+| **Types** | Static and checked before the program runs: `int`, `float`, `double`, `bool`, `string`, `Tensor`, structs, classes, `vector<T>`, `map<K, V>`. Type errors are compile errors. |
+| **Functions** | Several return values (`int q, int r = divmod(17, 5)`). A function without parameter types is **generic**: compiled once per argument-type combination, as C++ templates are (monomorphization). |
+| **Objects** | Structs, and classes with methods, constructors, inheritance and virtual dispatch; generic classes (`Box<T>`, one compiled copy per `T`). Objects are references, freed by reference counting when nothing refers to them. |
+| **Tensors and ML** | 1–6-dimensional tensors with `+ - * / @`, indexing, slicing and broadcasting; reverse-mode autograd; `novatorch.nn` / `optim` / `data` in the standard library, via `orbit` modules. |
+| **Ways to run** | Compiled to a native executable through MLIR and LLVM (`nova-compile`); interpreted, with a REPL and a step debugger; CUDA source output; GPU training on a SLURM cluster (`sol.finetune`). |
+
+How Nova's semantics differ from Python's, each difference checked against the interpreter: integer division,
+32-bit `int`, block scoping, references, and type errors at compile time. See
+[docs/PYTHON.md](docs/PYTHON.md).
 
 > **Interactive showcase:** [`docs/showcase/index.html`](docs/showcase/index.html) is a single-file page with a
 > live compiler walkthrough, a clickable architecture map and the benchmark charts.
@@ -463,6 +477,7 @@ The full plan is in [docs/ROADMAP.md](docs/ROADMAP.md).
 |---|---|
 | [docs/QUANTUM.md](docs/QUANTUM.md) | Compiling quantum circuits for a neutral-atom machine: the qnova dialect, its passes, the physics behind each rewrite |
 | [docs/SYNTAX.md](docs/SYNTAX.md) | The Nova language |
+| [docs/PYTHON.md](docs/PYTHON.md) | How Nova's semantics differ from Python's, and how its interpreter differs from CPython |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the IDE, backend, sandbox, NovaBot, SOL and compiler fit together |
 | [docs/SETUP.md](docs/SETUP.md) | Running and testing everything locally |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | Production deployment on EC2 |
