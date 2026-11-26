@@ -266,3 +266,64 @@ A tighter grid, 4 sites wide (`qbench.py --width 4`), changes only the routing:
   before the move out of it, so two atoms would have collided (the simulator stopped with "an atom moved onto
   another"). The gate level could not see it, because qubit values carry no sites. A move now waits for the layer
   after the move that vacated its site; layer counts went up by 1–23.
+
+## The statevector simulator on a GPU
+
+[`compiler/mlir/runtime/gpu/qsim_bench.cu`](../compiler/mlir/runtime/gpu/qsim_bench.cu) runs the same circuits on
+three backends:
+- the CPU simulator with one thread;
+- the CPU simulator with all cores (OpenMP);
+- the CUDA simulator.
+
+Up to 24 qubits it compares the GPU's final state with the CPU's, every amplitude. The two circuits:
+- **layers:** `depth` = 10 layers, each an `ry` and an `rz` on every qubit, then a `cz` brickwork. This is the shape of
+  a variational circuit.
+- **qft:** the quantum Fourier transform.
+
+The time is the gates' alone: the state is allocated before the clock starts. Effective bandwidth is the bytes each
+gate's kernel must move (a one-qubit gate reads and writes every amplitude, 32 bytes each; a `cz` or `cp` a quarter
+of them), over the time.
+
+SOL, one NVIDIA A100-SXM4-80GB (peak memory bandwidth 2,039 GB/s), against 16 cores of an AMD EPYC 7413
+(`compiler/mlir/runtime/gpu/run_sol.sh`):
+
+| Circuit | Qubits | Gates | CPU, 1 thread | CPU, 16 threads | GPU | vs 1 thread | vs 16 threads | GPU bandwidth | % of peak | Max \|GPU − CPU\| |
+|---|---|---|---|---|---|---|---|---|---|---|
+| layers | 16 | 395 | 146.3 ms | 873.4 ms* | 1.32 ms | 111× | – | 539 GB/s | 26% | 2.8e-17 |
+| qft | 16 | 136 | 16.9 ms | 2.9 ms | 0.42 ms | 40× | 6.8× | 230 GB/s | 11% | 0 |
+| layers | 18 | 445 | 606.6 ms | 55.1 ms | 2.00 ms | 304× | 27.6× | 1,601 GB/s | 79% | 2.1e-17 |
+| qft | 18 | 171 | 80.8 ms | 7.5 ms | 0.62 ms | 130× | 12.0× | 759 GB/s | 37% | 0 |
+| layers | 20 | 495 | 2,739.6 ms | 193.1 ms | 5.18 ms | 529× | 37.3× | 2,746 GB/s† | 135%† | 1.4e-17 |
+| qft | 20 | 210 | 388.3 ms | 31.0 ms | 1.37 ms | 282× | 22.5× | 1,648 GB/s | 81% | 0 |
+| layers | 22 | 545 | 12,290.5 ms | 846.1 ms | 39.77 ms | 309× | 21.3× | 1,574 GB/s | 77% | 1.3e-17 |
+| qft | 22 | 253 | 2,005.6 ms | 146.1 ms | 6.80 ms | 295× | 21.5× | 1,574 GB/s | 77% | 0 |
+| layers | 24 | 595 | 53,556.0 ms | 5,811.4 ms | 166.94 ms | 321× | 34.8× | 1,636 GB/s | 80% | 9.8e-18 |
+| qft | 24 | 300 | 9,290.7 ms | 1,305.8 ms | 36.36 ms | 256× | 35.9× | 1,373 GB/s | 67% | 0 |
+| layers | 26 | 645 | – | – | 714.14 ms | – | – | 1,658 GB/s | 81% | – |
+| qft | 26 | 351 | – | – | 164.50 ms | – | – | 1,400 GB/s | 69% | – |
+| layers | 28 | 695 | – | – | 3,077.35 ms | – | – | 1,657 GB/s | 81% | – |
+| qft | 28 | 406 | – | – | 760.78 ms | – | – | 1,383 GB/s | 68% | – |
+
+\* The first timed run started OpenMP's thread pool; the benchmark now warms both backends up before timing.
+† The state, 16 MB, fits in the A100's 40 MB L2 cache, so the kernels run faster than DRAM bandwidth allows.
+
+**Correctness.** At every size up to 24 qubits, the GPU's final state matches the CPU's to 2.8 × 10⁻¹⁷, which is
+floating-point rounding: the two compute each amplitude in the same order. `make dropin-check` runs a compiled
+circuit's runtime calls through the CPU runtime and through the GPU runtime: teleportation, a rotated six-qubit GHZ
+state, and a Bell pair from hardware instructions by site. The two print byte-identical output.
+
+**Three regimes**, as a memory-bound code should show:
+- **Up to 18 qubits (≤ 4 MB), launch-bound.** Each gate is one kernel over a small array, so a few microseconds of
+  launch and scheduling per gate dominate: 11–37% of peak at 16 qubits. Fusing consecutive one-qubit gates on a
+  qubit into one matrix (the compiler already sees them as one SSA chain), or capturing the circuit in a CUDA graph,
+  would cut the launches.
+- **20 qubits (16 MB), L2-resident.** The state lives in the 40 MB L2 cache, and the layered circuit runs at 135% of
+  the DRAM peak.
+- **22–28 qubits (64 MB–4 GB), DRAM-bound.** The steady state: the layered circuit sustains 1.57–1.66 TB/s, 77–81%
+  of the A100's peak. The QFT reports 67–77% on the same model, but its `cp` kernels touch a quarter of the amplitudes
+  in a strided pattern, so whole 32-byte sectors are fetched for a quarter of their data. The bytes really moved are
+  more than the model counts.
+
+**Speedups.** At 20–24 qubits, the GPU is 256–529× faster than one CPU thread and 21–37× faster than all 16
+cores. A 28-qubit, 695-gate circuit (a 4 GiB state) runs in 3.1 s. On the CPU with 16 threads, the 24-qubit one
+alone takes 5.8 s.

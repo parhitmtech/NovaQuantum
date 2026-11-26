@@ -4,17 +4,25 @@
 //
 // It runs the logical gates (h, cx, ...) and the native ones (r, rz, cz) alike, so a circuit can be run before and
 // after --qnova-to-native, and the probabilities compared: utils/qbench.py and test/Run/quantum*.mlir do that.
+//
+// The same functions exist for the GPU (runtime/gpu): built with NOVA_QUANTUM_GPU, this file leaves the statevector
+// functions (nova_q_*) to runtime/gpu/nova_quantum_gpu.cu and keeps what does not touch the state, the printing and
+// the hardware instructions by site. Built with OpenMP (-fopenmp), each gate's loop runs on every core.
 #include <complex.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#define MAX_QUBITS 24
+#ifdef _OPENMP
+#define PARALLEL_FOR _Pragma("omp parallel for schedule(static)")
+#define PARALLEL_SUM _Pragma("omp parallel for schedule(static) reduction(+ : p1)")
+#else
+#define PARALLEL_FOR
+#define PARALLEL_SUM
+#endif
 
-static double complex* state;
-static int32_t qubits;
-static uint64_t rng = 0x9E3779B97F4A7C15ull;  // xorshift64*, seeded from NOVA_SEED if set, so runs repeat
+#define MAX_QUBITS 30  // 2^30 amplitudes of 16 bytes: 16 GiB
 
 static void fail(const char* message)
 {
@@ -23,8 +31,24 @@ static void fail(const char* message)
     exit(1);
 }
 
-static double random_unit(void)
+// probs[k] for the 2^n basis states of n qubits, printed when at least 0.00005, as |01>: 0.5000 (the first qubit
+// leftmost). Printed to four places, so a circuit and its compiled form, or the CPU and the GPU, print the same.
+void nova_q_print_probs(int32_t n, const double* probs)
 {
+    for (size_t k = 0; k < ((size_t)1 << n); k++)
+    {
+        if (probs[k] < 0.00005) continue;
+        printf("|");
+        for (int32_t j = n - 1; j >= 0; j--) printf("%d", (int)((k >> j) & 1));
+        printf(">: %.4f\n", probs[k]);
+    }
+}
+
+// The random numbers measurement outcomes are drawn from: xorshift64*, seeded from NOVA_SEED if set, so runs
+// repeat. The GPU runtime draws from this same generator, so a seed gives the same outcomes there.
+double nova_q_random(void)
+{
+    static uint64_t rng = 0x9E3779B97F4A7C15ull;
     static int seeded;
     if (!seeded)
     {
@@ -38,24 +62,44 @@ static double random_unit(void)
     return (double)((rng * 0x2545F4914F6CDD1Dull) >> 11) / 9007199254740992.0;  // [0, 1)
 }
 
+#ifndef NOVA_QUANTUM_GPU
+
+static double complex* state;
+static int32_t qubits;
+
 // A new qubit, |0>: the state tensored with |0>, so every amplitude with the new bit set is 0
 int32_t nova_q_alloc(void)
 {
-    if (qubits == MAX_QUBITS) fail("more qubits than the simulator holds (24)");
+    if (qubits == MAX_QUBITS) fail("more qubits than the simulator holds (30)");
     size_t size = (size_t)1 << qubits;
-    state = (double complex*)realloc(state, 2 * size * sizeof(double complex));
+    double complex* grown = (double complex*)realloc(state, 2 * size * sizeof(double complex));
+    if (!grown) fail("out of memory for the state");
+    state = grown;
     if (qubits == 0) state[0] = 1;
     for (size_t i = size; i < 2 * size; i++) state[i] = 0;
     return qubits++;
 }
 
-// The 2x2 matrix [[a, b], [c, d]] on qubit q: each pair of basis states that differ only in bit q
+// No qubits again: the benchmark (runtime/gpu/qsim_bench.cu) runs one circuit after another
+void nova_q_reset(void)
+{
+    free(state);
+    state = NULL;
+    qubits = 0;
+}
+
+// The amplitudes, for checking the GPU simulator against this one (runtime/gpu/qsim_bench.cu)
+const double complex* nova_q_amplitudes(void) { return state; }
+
+// The 2x2 matrix [[a, b], [c, d]] on qubit q: each pair of basis states that differ only in bit q. Iterating over
+// the pairs (k with a 0 inserted at bit q) gives each its own iteration, so the loop parallelizes.
 static void apply(int32_t q, double complex a, double complex b, double complex c, double complex d)
 {
-    size_t size = (size_t)1 << qubits, bit = (size_t)1 << q;
-    for (size_t i = 0; i < size; i++)
+    size_t half = (size_t)1 << (qubits - 1), bit = (size_t)1 << q;
+    PARALLEL_FOR
+    for (size_t k = 0; k < half; k++)
     {
-        if (i & bit) continue;
+        size_t i = ((k & ~(bit - 1)) << 1) | (k & (bit - 1));  // bit q of i is 0
         double complex x0 = state[i], x1 = state[i | bit];
         state[i] = a * x0 + b * x1;
         state[i | bit] = c * x0 + d * x1;
@@ -84,6 +128,7 @@ void nova_q_r(int32_t q, double t, double phi)
 void nova_q_cz(int32_t a, int32_t b)
 {
     size_t size = (size_t)1 << qubits, both = ((size_t)1 << a) | ((size_t)1 << b);
+    PARALLEL_FOR
     for (size_t i = 0; i < size; i++)
         if ((i & both) == both) state[i] = -state[i];
 }
@@ -92,6 +137,7 @@ void nova_q_cp(int32_t a, int32_t b, double lambda)
 {
     size_t size = (size_t)1 << qubits, both = ((size_t)1 << a) | ((size_t)1 << b);
     double complex phase = cexp(I * lambda);
+    PARALLEL_FOR
     for (size_t i = 0; i < size; i++)
         if ((i & both) == both) state[i] *= phase;
 }
@@ -99,6 +145,7 @@ void nova_q_cp(int32_t a, int32_t b, double lambda)
 void nova_q_cx(int32_t control, int32_t target)
 {
     size_t size = (size_t)1 << qubits, c = (size_t)1 << control, t = (size_t)1 << target;
+    PARALLEL_FOR
     for (size_t i = 0; i < size; i++)
     {
         if (!(i & c) || (i & t)) continue;  // each pair once: control set, target clear
@@ -111,6 +158,7 @@ void nova_q_cx(int32_t control, int32_t target)
 void nova_q_swap(int32_t a, int32_t b)
 {
     size_t size = (size_t)1 << qubits, ba = (size_t)1 << a, bb = (size_t)1 << b;
+    PARALLEL_FOR
     for (size_t i = 0; i < size; i++)
     {
         if (!(i & ba) || (i & bb)) continue;  // a set, b clear: exchange with a clear, b set
@@ -126,22 +174,20 @@ int32_t nova_q_measure(int32_t q)
 {
     size_t size = (size_t)1 << qubits, bit = (size_t)1 << q;
     double p1 = 0;
+    PARALLEL_SUM
     for (size_t i = 0; i < size; i++)
         if (i & bit) p1 += creal(state[i] * conj(state[i]));
-    int32_t outcome = random_unit() < p1;
+    int32_t outcome = nova_q_random() < p1;
     double norm = sqrt(outcome ? p1 : 1 - p1);
+    PARALLEL_FOR
     for (size_t i = 0; i < size; i++)
         state[i] = ((i & bit) != 0) == outcome ? state[i] / norm : 0;
     return outcome;
 }
 
-// The probability of each basis state of the n qubits q[0..n) (n up to 12, the first leftmost), printed when at
-// least 0.00005, as |01>: 0.5000. Printed to four places, so a circuit and its compiled form print the same.
-void nova_q_probs(int32_t n, int32_t q0, int32_t q1, int32_t q2, int32_t q3, int32_t q4, int32_t q5, int32_t q6,
-                  int32_t q7, int32_t q8, int32_t q9, int32_t q10, int32_t q11)
+// probs[k] for the 2^n basis states of the qubits q[0..n), the first the most significant bit of k
+void nova_q_probabilities(int32_t n, const int32_t* q, double* probs)
 {
-    int32_t q[12] = {q0, q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11};
-    static double probs[4096];
     for (size_t k = 0; k < ((size_t)1 << n); k++) probs[k] = 0;
     size_t size = (size_t)1 << qubits;
     for (size_t i = 0; i < size; i++)
@@ -150,14 +196,28 @@ void nova_q_probs(int32_t n, int32_t q0, int32_t q1, int32_t q2, int32_t q3, int
         for (int32_t j = 0; j < n; j++) k = (k << 1) | ((i >> q[j]) & 1);
         probs[k] += creal(state[i] * conj(state[i]));
     }
-    for (size_t k = 0; k < ((size_t)1 << n); k++)
-    {
-        if (probs[k] < 0.00005) continue;
-        printf("|");
-        for (int32_t j = n - 1; j >= 0; j--) printf("%d", (int)((k >> j) & 1));
-        printf(">: %.4f\n", probs[k]);
-    }
 }
+
+void nova_q_probs(int32_t n, int32_t q0, int32_t q1, int32_t q2, int32_t q3, int32_t q4, int32_t q5, int32_t q6,
+                  int32_t q7, int32_t q8, int32_t q9, int32_t q10, int32_t q11)
+{
+    int32_t q[12] = {q0, q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11};
+    static double probs[4096];
+    nova_q_probabilities(n, q, probs);
+    nova_q_print_probs(n, probs);
+}
+
+#else  // the GPU runtime provides these (runtime/gpu/nova_quantum_gpu.cu)
+
+int32_t nova_q_alloc(void);
+void nova_q_r(int32_t q, double t, double phi);
+void nova_q_rz(int32_t q, double t);
+void nova_q_cz(int32_t a, int32_t b);
+int32_t nova_q_measure(int32_t q);
+void nova_q_probs(int32_t n, int32_t q0, int32_t q1, int32_t q2, int32_t q3, int32_t q4, int32_t q5, int32_t q6,
+                  int32_t q7, int32_t q8, int32_t q9, int32_t q10, int32_t q11);
+
+#endif
 
 // ─── Hardware instructions (the atom dialect), on the same simulator ─────────
 //

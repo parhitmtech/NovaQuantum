@@ -259,6 +259,18 @@ routing rather than gate count dominates a circuit's run time, which is what a m
 Reproduce the table with `python3 compiler/mlir/utils/qbench.py --build <build dir>`, or pass `--width 4` to see the
 effect of a tighter grid.
 
+## On the GPU
+
+The simulator also runs on a GPU ([`compiler/mlir/runtime/gpu`](../compiler/mlir/runtime/gpu/README.md)): the same
+operations in CUDA, one coalesced kernel per gate, because a statevector simulator is memory-bound (a one-qubit
+gate reads and writes every amplitude for a few flops each). Its C functions are the runtime's, so a compiled
+program runs its circuits on the GPU by linking with it (`nova-compile --gpu`). `qsim_bench` runs the same circuits
+on the CPU (one thread and every core) and the GPU, compares every amplitude, and reports the speedup and the GPU's
+effective memory bandwidth against its peak; `run_sol.sh` runs it on an A100. On an A100-80GB, the GPU's states match
+the CPU's to 10⁻¹⁷. Steady state (22–28 qubits) runs at 1.57–1.66 TB/s, 77–81% of peak memory bandwidth. At 20–24
+qubits the GPU is 256–529× faster than one CPU core and 21–37× faster than 16; a 28-qubit, 695-gate circuit takes 3.1 s
+([BENCHMARKS.md](BENCHMARKS.md#the-statevector-simulator-on-a-gpu)).
+
 ## Tests
 
 - `test/QNova/ops.mlir`: every op round-trips through the printer and parser.

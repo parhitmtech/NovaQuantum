@@ -12,10 +12,14 @@
 //   --hardware                                  compile a circuit down to the machine's timed instructions (the atom
 //                                               dialect), which the simulator runs by site; with --qnova-stats, it
 //                                               prints their run time too
+//   --gpu                                       link with the GPU runtime (runtime/gpu: make there first), so the
+//                                               circuits run on the GPU simulator; NOVA_GPU_RUNTIME and CUDA_HOME
+//                                               override where it and CUDA are
 //
 // It is nova-lower | nova-opt --nova-to-llvm | mlir-translate --mlir-to-llvmir | clang, without the text in between:
 // the module stays in memory, so every op keeps the Nova line it came from, which the runtime's error messages
 // print. clang then optimizes (-O2 unless -O0 is given) and links.
+#include <cstdlib>
 #include <string>
 
 #include "Nova/LowerTree.h"
@@ -53,6 +57,7 @@ static cl::opt<bool> noOptimize("O0", cl::desc("Have clang compile without optim
 static cl::opt<bool> logical("logical", cl::desc("Run a circuit as written, without compiling it for the machine"));
 static cl::opt<bool> stats("qnova-stats", cl::desc("Print each circuit's gates, moves and depth as compiled"));
 static cl::opt<bool> hardware("hardware", cl::desc("Compile a circuit down to the machine's timed instructions"));
+static cl::opt<bool> gpu("gpu", cl::desc("Link with the GPU runtime (runtime/gpu): circuits run on the GPU"));
 
 int main(int argc, char** argv)
 {
@@ -150,10 +155,23 @@ int main(int argc, char** argv)
         ir->print(file, nullptr);
     }
     llvm::StringRef clang = NOVA_CLANG;  // set by CMake: LLVM's clang, and the runtime library this build made
-    llvm::SmallVector<llvm::StringRef> args{clang,        noOptimize ? "-O0" : "-O2", "-Wno-override-module", ll,
-                                            NOVA_RUNTIME, "-lm",  "-o",                       output};
+    llvm::SmallVector<std::string> args{clang.str(), noOptimize ? "-O0" : "-O2", "-Wno-override-module", ll};
+    if (gpu)  // the GPU runtime (runtime/gpu, built by its Makefile) and CUDA's runtime library
+    {
+        const char* runtime = std::getenv("NOVA_GPU_RUNTIME");
+        const char* cuda = std::getenv("CUDA_HOME");
+        args.push_back(runtime ? runtime : NOVA_GPU_RUNTIME);
+        args.push_back(std::string("-L") + (cuda ? cuda : "/usr/local/cuda") + "/lib64");
+        args.push_back("-lcudart");
+        args.push_back("-lstdc++");
+    }
+    else
+        args.push_back(NOVA_RUNTIME);
+    for (const char* a : {"-lm", "-o"}) args.push_back(a);
+    args.push_back(output);
+    llvm::SmallVector<llvm::StringRef> argRefs(args.begin(), args.end());
     std::string message;
-    int status = llvm::sys::ExecuteAndWait(clang, args, std::nullopt, {}, 0, 0, &message);
+    int status = llvm::sys::ExecuteAndWait(clang, argRefs, std::nullopt, {}, 0, 0, &message);
     llvm::sys::fs::remove(ll);
     if (status != 0)
     {
