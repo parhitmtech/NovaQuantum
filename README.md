@@ -118,6 +118,11 @@ a block argument, and an `if` carries it out as a result:
   CI requires identical probabilities. It runs the hardware program too, by site. That check found a scheduler bug
   in which two atoms collided, invisible at the gate level
   ([QUANTUM.md](docs/QUANTUM.md#the-hardware-layer-timed-instructions-the-atom-dialect)).
+- **OpenQASM 3 in and out, checked against Qiskit.** `nova-translate` exports a circuit to OpenQASM and imports one
+  (`nova-compile` takes `.qasm` too). Qiskit's independent simulator agrees with Nova in **all 88 comparisons**:
+  Nova's circuits exported as written and as compiled for the machine, and Qiskit's random circuits imported and
+  run as written, as native gates and as hardware instructions
+  ([BENCHMARKS.md](docs/BENCHMARKS.md#against-qiskit-through-openqasm)).
 - **On the GPU.** A CUDA statevector simulator (one coalesced kernel per gate) is a drop-in for the runtime
   (`nova-compile --gpu`). On an A100-80GB it matches the CPU to 10⁻¹⁷ and sustains **1.6 TB/s, 77–81% of peak
   memory bandwidth**, **256–529× faster** than one CPU core and 21–37× faster than 16 at 20–24 qubits; a 28-qubit
@@ -144,7 +149,7 @@ You need LLVM/MLIR 20 (with `clang-20`), CMake, Ninja and `lit`. On Ubuntu, inst
 git clone https://github.com/parhitmtech/NovaQuantum.git && cd NovaQuantum
 cmake -G Ninja -S compiler/mlir -B build/mlir -DMLIR_DIR=/usr/lib/llvm-20/lib/cmake/mlir \
       -DLLVM_EXTERNAL_LIT=$(command -v lit)
-ninja -C build/mlir check-nova                                        # 36 lit tests
+ninja -C build/mlir check-nova                                        # 41 lit tests
 
 build/mlir/bin/nova-compile compiler/mlir/test/Run/tensors.nova -o t && ./t      # Nova to a native executable
 build/mlir/bin/nova-compile compiler/mlir/test/Run/quantum.mlir --qnova-stats -o q && ./q   # a circuit

@@ -397,6 +397,8 @@ Full record: [QUANTUM.md](QUANTUM.md).
 - **A third layer, `atom`, holds the hardware instructions.** They name sites instead of qubit values and carry start
   times and durations. A layer's `cz` gates become one global Rydberg pulse. The timing model's parameters are pass
   options.
+- **OpenQASM 3 to and from qnova** (`nova-translate`): export follows each SSA qubit value back to its allocation to
+  name the wires; import builds SSA as the lowering does. Through it, Qiskit checks the pipeline from outside.
 - **Every compiled circuit is checked against its logical form on a statevector simulator,** in CI: the same
   differential idea as C13. The simulator runs the hardware program by site as well. That check caught a dependence the
   scheduler missed: a site is a resource that no SSA value carries, so a move into a site must wait for the move

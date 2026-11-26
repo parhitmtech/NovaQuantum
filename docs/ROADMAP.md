@@ -235,9 +235,10 @@ checks every benchmark circuit compiled against logical; and Nova syntax for cir
 feedback through `if` and loops), lowered by the same SSA construction as variables, with no-cloning checked in the
 language and, path by path, in the IR. Also done: the `atom` dialect of timed hardware instructions
 (`--qnova-to-atom`, `--atom-timing`, `nova-compile --hardware`), run by site on the simulator and checked against the
-logical circuit in CI. A CUDA statevector simulator too, a drop-in for the runtime, at 77–81% of
-an A100's peak memory bandwidth. Next: gate fusion for small circuits (launch-bound), a move-aware router (moves
-dominate run time), qubits through functions, and a richer machine model.
+logical circuit in CI. A CUDA statevector simulator too, a drop-in for the runtime, at 77–81% of an A100's peak
+memory bandwidth. And OpenQASM 3 in and out (`nova-translate`), with Qiskit as an outside check in CI. Next: gate
+fusion for small circuits (launch-bound), a move-aware router (moves dominate run time), qubits through functions,
+and a richer machine model.
 
 **D. A tile-level kernel language in Nova.** `kernel` functions that work on blocks of a tensor, as Triton's do:
 a program id, block pointers, masked loads and stores, and a block-level `dot`. They are checked by the check pass

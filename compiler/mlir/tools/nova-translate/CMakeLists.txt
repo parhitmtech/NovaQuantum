@@ -1,0 +1,5 @@
+# nova-translate: OpenQASM 3 to and from the qnova dialect (as mlir-translate is for LLVM IR)
+add_llvm_executable(nova-translate nova-translate.cpp)
+llvm_update_compile_flags(nova-translate)
+target_link_libraries(nova-translate PRIVATE NovaQASM MLIRTranslateLib)
+mlir_check_all_link_libraries(nova-translate)
