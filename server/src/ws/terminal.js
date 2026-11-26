@@ -7,7 +7,7 @@ const security = require('../services/security');
 const { S3_BUCKET, WORKSPACE, MAX_EXECUTION_MS, MAX_OUTPUT_BYTES, REPL_IDLE_TIMEOUT } = require('../config');
 const { log } = require('../lib/logger');
 const { s3 } = require('../services/aws');
-const { filterStderr, validateSource, writeTempFile, cleanupTempFile } = require('../services/compiler-runner');
+const { filterStderr, validateSource, writeTempFile, cleanupTempFile, isNativeProgram } = require('../services/compiler-runner');
 const { spawnCompiler } = require('../services/execution');
 const { getWorkspaceStore } = require('../services/workspace-store');
 const { GetObjectCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
@@ -330,7 +330,11 @@ async function createShellSession(ws, userId) {
       const flags = Array.isArray(meta.extraArgs) ? meta.extraArgs : [];
       if (flags.some(flag => !['--optimize', '--dump-ir'].includes(flag))) { cleanupTempFile(tmpFile, tmpDir); send('Invalid compiler options'); resolve(); return; }
       let proc;
-      try { proc = spawnCompiler([tmpFile, ...flags], { cwd: tmpDir, timeoutMs: MAX_EXECUTION_MS, userId }); }
+      // A quantum program or an OpenQASM circuit runs through the native compiler, which takes none of these flags
+      const native = isNativeProgram(source);
+      try {
+        proc = spawnCompiler([tmpFile, ...(native ? [] : flags)], { cwd: tmpDir, timeoutMs: MAX_EXECUTION_MS, userId, native });
+      }
       catch (err) { cleanupTempFile(tmpFile, tmpDir); send(err.message); resolve(); return; }
       currentProc = proc;
       proc.__killed = false;

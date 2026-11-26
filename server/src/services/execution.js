@@ -32,6 +32,10 @@ function createExecutor(config = {}) {
   if (mode === 'local' && nodeEnv === 'production')
     throw new Error('Local execution is forbidden in production. Use the isolated worker.');
   const binary = config.binary || paths.COMPILER_PATH;
+  // Quantum programs and OpenQASM circuits run through the native compiler instead: compiled through MLIR and LLVM
+  // and run at once by its JIT (--run), nothing written, in the same sandbox
+  const nativeBinary = config.nativeBinary || paths.NATIVE_COMPILER_PATH;
+  const NATIVE_FLAGS = ['--run', '--hardware', '--qnova-stats'];
   const maxConcurrent = config.maxConcurrent || 5;
   const maxOutputBytes = config.maxOutputBytes || 256_000;
   const maxPerUser = config.maxPerUser || 2;
@@ -67,7 +71,9 @@ function createExecutor(config = {}) {
       if (real !== root && !real.startsWith(root + path.sep)) throw new Error('Compiler files must stay in the job directory.');
     }
     const env = { PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8', NOVA_HOME: paths.NOVA_HOME };
-    if (mode === 'local') return { command: binary, args, cwd, env };
+    const native = options.native === true;
+    const program = native ? [...NATIVE_FLAGS, ...args] : args;
+    if (mode === 'local') return { command: native ? nativeBinary : binary, args: program, cwd, env };
     Object.assign(env, dockerEnvironment());
     const uid = process.getuid?.() || 65534;
     const gid = process.getgid?.() || 65534;
@@ -77,14 +83,15 @@ function createExecutor(config = {}) {
       args: ['run', '--rm', '--init', '-i', '--name', name,
         '--label', `nova.worker=${workerId()}`, '--label', 'nova.job=true',
         '--network=none', '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges',
-        '--memory=256m', '--memory-swap=256m', '--pids-limit=32', '--cpus=1',
+        `--memory=${native ? 512 : 256}m`, `--memory-swap=${native ? 512 : 256}m`, '--pids-limit=32', '--cpus=1',
         '--ulimit', 'nofile=64:64', '--ulimit', 'fsize=16777216:16777216',
         '--user', `${uid}:${gid}`, '--tmpfs', '/tmp:rw,noexec,nosuid,size=32m',
         '--mount', `type=bind,source=${cwd},target=${cwd}`, '--workdir', cwd,
         // GNU timeout inside the container enforces the deadline even if this server dies.
         '--env', 'NOVA_HOME=/opt/nova', '--entrypoint', '/usr/bin/timeout',
         process.env.NOVA_WORKER_IMAGE || 'novacomp-worker:local',
-        '--signal=KILL', `${deadline(options) / 1000}s`, '/opt/nova/nova', ...args],
+        '--signal=KILL', `${deadline(options) / 1000}s`, native ? '/opt/nova/nova-compile' : '/opt/nova/nova',
+        ...program],
     };
   }
 

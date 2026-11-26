@@ -7,10 +7,31 @@ COPY compiler/include ./include
 COPY compiler/src ./src
 RUN make
 
+# The native compiler (compiler/mlir): nova-compile, which runs quantum programs and OpenQASM circuits through MLIR
+# and LLVM with its JIT (--run). Built against LLVM/MLIR 20 from apt.llvm.org, the release the MLIR CI job uses.
+FROM debian:bookworm-slim AS native-build
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget gnupg g++ cmake ninja-build \
+    && wget -qO /etc/apt/trusted.gpg.d/apt.llvm.org.asc https://apt.llvm.org/llvm-snapshot.gpg.key \
+    && echo "deb http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-20 main" > /etc/apt/sources.list.d/llvm.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends llvm-20-dev libmlir-20-dev mlir-20-tools \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY compiler/include ./compiler/include
+COPY compiler/src ./compiler/src
+COPY compiler/mlir ./compiler/mlir
+RUN cmake -G Ninja -S compiler/mlir -B build -DMLIR_DIR=/usr/lib/llvm-20/lib/cmake/mlir -DLLVM_EXTERNAL_LIT=/bin/true \
+    && ninja -C build nova-compile
+
 FROM debian:bookworm-slim AS worker
-RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 coreutils && rm -rf /var/lib/apt/lists/*
+# libllvm20 (LLVM's shared library, which nova-compile links) from the same signed repository
+COPY --from=native-build /etc/apt/trusted.gpg.d/apt.llvm.org.asc /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+RUN echo "deb http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-20 main" > /etc/apt/sources.list.d/llvm.list \
+    && apt-get update && apt-get install -y --no-install-recommends libstdc++6 coreutils libllvm20 \
+    && rm -rf /var/lib/apt/lists/* /etc/apt/sources.list.d/llvm.list
 WORKDIR /opt/nova
 COPY --from=compiler-build /src/build/nova ./nova
+COPY --from=native-build /src/build/bin/nova-compile ./nova-compile
 COPY compiler/stdlib ./stdlib
 ENV NOVA_HOME=/opt/nova
 USER 65534:65534

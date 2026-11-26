@@ -236,7 +236,8 @@ feedback through `if` and loops), lowered by the same SSA construction as variab
 language and, path by path, in the IR. Also done: the `atom` dialect of timed hardware instructions
 (`--qnova-to-atom`, `--atom-timing`, `nova-compile --hardware`), run by site on the simulator and checked against the
 logical circuit in CI. A CUDA statevector simulator too, a drop-in for the runtime, at 77–81% of an A100's peak
-memory bandwidth. And OpenQASM 3 in and out (`nova-translate`), with Qiskit as an outside check in CI. Next: gate
+memory bandwidth. And OpenQASM 3 in and out (`nova-translate`), with Qiskit as an outside check in CI. And the cloud IDE
+runs quantum programs and OpenQASM circuits in its sandbox, through `nova-compile --run` (LLVM's JIT). Next: gate
 fusion for small circuits (launch-bound), a move-aware router (moves dominate run time), qubits through functions,
 and a richer machine model.
 

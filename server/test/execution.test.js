@@ -118,6 +118,33 @@ test('Docker spec permits files above 16 KiB, enforces an internal deadline, and
   } finally { prior === undefined ? delete process.env.DOCKER_HOST : process.env.DOCKER_HOST = prior; }
 });
 
+test('a native job runs the JIT compiler in the same sandbox, with room for LLVM', () => {
+  const { createExecutor } = require('../src/services/execution');
+  const spec = createExecutor({ mode: 'docker' }).buildCommand([], { cwd: os.tmpdir(), timeoutMs: 1200, native: true });
+  const program = spec.args.indexOf('1.2s') + 1;
+  // nova-compile --run: compiled through MLIR and LLVM in memory and run, with the circuit's stats on stderr
+  assert.deepEqual(spec.args.slice(program, program + 4), ['/opt/nova/nova-compile', '--run', '--hardware', '--qnova-stats']);
+  // The sandbox is the interpreter's: no network, read-only, every capability dropped; only memory is larger
+  for (const flag of ['--network=none', '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges'])
+    assert.ok(spec.args.includes(flag), flag);
+  assert.ok(spec.args.includes('--memory=512m'));
+  const plain = createExecutor({ mode: 'docker' }).buildCommand([], { cwd: os.tmpdir(), timeoutMs: 1200 });
+  assert.ok(plain.args.includes('--memory=256m'));
+  assert.equal(plain.args[plain.args.indexOf('1.2s') + 1], '/opt/nova/nova');
+});
+
+test('quantum programs and OpenQASM circuits go to the native compiler', () => {
+  // compiler-runner loads the config, which needs a strong JWT secret (an earlier test removes its own)
+  process.env.JWT_SECRET ||= require('node:crypto').randomBytes(48).toString('base64');
+  const { isNativeProgram, isOpenQASM } = require('../src/services/compiler-runner');
+  assert.ok(isNativeProgram('ignite:\n    qubit a = qpu.alloc()\n    qpu.h(a)\n'));
+  assert.ok(isNativeProgram('OPENQASM 3.0;\nqubit[2] q;\n'));
+  assert.ok(isOpenQASM('// from Qiskit\nOPENQASM 2.0;\nqreg q[2];\n'));
+  assert.ok(!isOpenQASM('ignite:\n    qubit a = qpu.alloc()\n'));
+  assert.ok(!isNativeProgram('ignite:\n    int qubits = 3\n    print(qubits)\n'));
+  assert.ok(!isNativeProgram('ignite:\n    print(42)\n'));
+});
+
 test('per-user batch quotas and the separate REPL pool preserve execution for other users', async () => {
   const { createExecutor } = require('../src/services/execution');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nova-quota-'));

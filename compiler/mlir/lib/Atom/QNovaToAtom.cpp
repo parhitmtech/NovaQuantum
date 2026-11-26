@@ -61,6 +61,10 @@ struct QNovaToAtom : PassWrapper<QNovaToAtom, OperationPass<func::FuncOp>>
                                    llvm::cl::desc("Picking up and dropping an atom, in ns"), llvm::cl::init(15000)};
     Option<int64_t> measureNs{*this, "measure-ns", llvm::cl::desc("Imaging the atoms, in ns"),
                               llvm::cl::init(1000000)};
+    Option<bool> skipUnscheduled{*this, "skip-unscheduled",
+                                 llvm::cl::desc("Leave a circuit the scheduler did not place (one with control flow) "
+                                                "at native gates, instead of failing"),
+                                 llvm::cl::init(false)};
 
     StringRef getArgument() const override { return "qnova-to-atom"; }
     StringRef getDescription() const override
@@ -85,6 +89,7 @@ struct QNovaToAtom : PassWrapper<QNovaToAtom, OperationPass<func::FuncOp>>
         if (!any) return;
         if (!f->hasAttr("qnova.depth"))
         {
+            if (skipUnscheduled) return;  // its native gates run as they are
             f.emitError("the circuit is not scheduled: run --qnova-schedule first (a circuit with control flow is not "
                         "scheduled yet)");
             return signalPassFailure();
@@ -284,7 +289,12 @@ struct Timing : PassWrapper<Timing, OperationPass<func::FuncOp>>
 };
 }  // namespace
 
-std::unique_ptr<Pass> atom::createQNovaToAtomPass() { return std::make_unique<QNovaToAtom>(); }
+std::unique_ptr<Pass> atom::createQNovaToAtomPass(bool skipUnscheduled)
+{
+    auto pass = std::make_unique<QNovaToAtom>();
+    pass->skipUnscheduled = skipUnscheduled;
+    return pass;
+}
 std::unique_ptr<Pass> atom::createTimingPass() { return std::make_unique<Timing>(); }
 
 void atom::registerPasses()
