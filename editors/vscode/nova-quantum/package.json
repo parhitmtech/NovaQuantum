@@ -14,7 +14,7 @@
   "engines": { "vscode": "^1.91.0" },
   "categories": ["Programming Languages", "Linters"],
   "keywords": ["quantum", "openqasm", "qasm", "neutral atom", "qubit", "nova", "mlir", "compiler", "simulator"],
-  "extensionDependencies": ["parhitmathur.nova"],
+  "extensionDependencies": ["parhitmathur.nova-programming-language"],
   "main": "./dist/extension.js",
   "activationEvents": ["onLanguage:nova"],
   "capabilities": {

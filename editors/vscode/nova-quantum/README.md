@@ -1,7 +1,7 @@
 # Nova Quantum
 
 **Nova Quantum** compiles quantum programs for **neutral-atom quantum computers**. Write circuits in
-[Nova](https://marketplace.visualstudio.com/items?itemName=parhitmathur.nova) (a `qubit` type, `qpu` gates, classical
+[Nova](https://marketplace.visualstudio.com/items?itemName=parhitmathur.nova-programming-language) (a `qubit` type, `qpu` gates, classical
 feedback with `if`) or in **OpenQASM 3**, as Qiskit and CUDA-Q write it. The compiler, built on MLIR and LLVM,
 decomposes circuits into the machine's native gates, optimizes them, routes qubits by moving atoms, and schedules
 them into timed hardware instructions; a statevector simulator checks every compiled circuit against the original.

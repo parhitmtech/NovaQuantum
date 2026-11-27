@@ -46,7 +46,7 @@ suite('Nova Quantum', () => {
     const ext = vscode.extensions.getExtension('parhitmathur.nova-quantum');
     assert.ok(ext);
     await until('the extension to activate', () => ext.isActive);
-    assert.ok(vscode.extensions.getExtension('parhitmathur.nova'), 'the Nova extension it depends on is there');
+    assert.ok(vscode.extensions.getExtension('parhitmathur.nova-programming-language'), 'the Nova extension it depends on is there');
     const commands = await vscode.commands.getCommands(true);
     for (const c of ['novaQuantum.runOnSimulator', 'novaQuantum.compileForHardware', 'novaQuantum.showCircuit', 'novaQuantum.exportOpenQASM']) {
       assert.ok(commands.includes(c), c);
