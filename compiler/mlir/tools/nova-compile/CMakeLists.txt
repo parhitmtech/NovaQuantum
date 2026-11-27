@@ -18,7 +18,13 @@ target_link_libraries(nova-compile PRIVATE
     # --run: the runtime inside this program, every function of it, exported so the JIT finds them in the process
     -Wl,--whole-archive nova_runtime -Wl,--no-whole-archive
 )
-target_link_options(nova-compile PRIVATE -rdynamic)
+# The runtime's functions exported from the executable, so the JIT finds them in the process: -rdynamic on Linux;
+# on Windows (MinGW) the executable exports them as a DLL would
+if(WIN32)
+  target_link_options(nova-compile PRIVATE -Wl,--export-all-symbols)
+else()
+  target_link_options(nova-compile PRIVATE -rdynamic)
+endif()
 target_compile_definitions(nova-compile PRIVATE
     NOVA_CLANG="${LLVM_TOOLS_BINARY_DIR}/clang"
     NOVA_RUNTIME="${CMAKE_BINARY_DIR}/lib/libnova_runtime.a"
