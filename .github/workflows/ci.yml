@@ -206,6 +206,12 @@ jobs:
           cd editors/vscode/nova-quantum && npm ci && npm run build
           NOVA_QUANTUM_BIN=$GITHUB_WORKSPACE/build/mlir/bin xvfb-run -a npm run test:extension
 
+  # Nova Quantum's packages, with nova-compile and nova-translate built against a static LLVM and MLIR
+  # (.github/workflows/quantum-packages.yml; LLVM and MLIR are built once, then come from the cache)
+  quantum-packages:
+    name: Nova Quantum packages
+    uses: ./.github/workflows/quantum-packages.yml
+
   vscode-quantum:
     name: VS Code extension (nova-quantum)
     runs-on: ubuntu-24.04
