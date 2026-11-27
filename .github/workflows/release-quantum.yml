@@ -54,7 +54,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:grammar
       - run: npm run test:unit
-      - run: npx vsce package --no-dependencies -o nova-quantum.vsix
+      # a pre-release package for a pre-release: vsce publishes --pre-release only from a package built as one
+      - run: npx vsce package --no-dependencies $([ "${{ steps.check.outputs.prerelease }}" = true ] && echo --pre-release) -o nova-quantum.vsix
       - uses: actions/upload-artifact@v7
         with:
           name: nova-quantum.vsix
