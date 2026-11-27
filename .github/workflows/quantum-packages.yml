@@ -8,6 +8,11 @@ name: Nova Quantum packages
 
 on:
   workflow_call:
+    inputs:
+      prerelease:
+        description: package as a pre-release (vsce publishes a pre-release only from a package built as one)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -151,7 +156,8 @@ jobs:
           cd editors/vscode/nova-quantum
           npm ci
           node scripts/bundle.js ${{ matrix.target }} "$GITHUB_WORKSPACE/build/mlir/bin"
-          npx vsce package --target ${{ matrix.target }} --no-dependencies -o nova-quantum-${{ matrix.target }}.vsix
+          npx vsce package --target ${{ matrix.target }} --no-dependencies ${{ inputs.prerelease && '--pre-release' || '' }} \
+            -o nova-quantum-${{ matrix.target }}.vsix
           python -c "import zipfile, sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" \
             nova-quantum-${{ matrix.target }}.vsix unpacked
           ls -l nova-quantum-${{ matrix.target }}.vsix
