@@ -50,6 +50,8 @@
 #include "mlir/Target/LLVMIR/Export.h"
 #include "mlir/ExecutionEngine/ExecutionEngine.h"
 #include "mlir/ExecutionEngine/OptUtils.h"
+#include "llvm/ExecutionEngine/Orc/Core.h"
+#include "llvm/ExecutionEngine/Orc/Mangling.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
@@ -72,6 +74,13 @@ static cl::opt<bool> stats("qnova-stats", cl::desc("Print each circuit's gates, 
 static cl::opt<bool> hardware("hardware", cl::desc("Compile a circuit down to the machine's timed instructions"));
 static cl::opt<bool> run("run", cl::desc("Compile in memory (JIT) and run, writing nothing"));
 static cl::opt<bool> gpu("gpu", cl::desc("Link with the GPU runtime (runtime/gpu): circuits run on the GPU"));
+
+#if defined(__MINGW32__)
+// The __main the JIT's code calls on MinGW (see --run below): there is nothing left for it to do
+static void nova_jit_main_hook() {}
+// libgcc's stack probe, which code with a stack frame larger than a page calls; linked into this program
+extern "C" void ___chkstk_ms();
+#endif
 
 int main(int argc, char** argv)
 {
@@ -184,9 +193,9 @@ int main(int argc, char** argv)
     mlir::registerLLVMDialectTranslation(context);
 
     // --run: compile the module to machine code in this process (LLVM's ORC JIT, through MLIR's ExecutionEngine) and
-    // call its main. The runtime's functions are linked into this program and exported (-rdynamic), so the JIT finds
-    // them in the process. Nothing is written to disk and no compiler or linker runs: the IDE's sandbox, a read-only
-    // container whose /tmp cannot hold executables, can run it.
+    // call its main. The runtime's functions are linked into this program and exported (-rdynamic; a .def file on
+    // Windows), so the JIT finds them in the process. Nothing is written to disk and no compiler or linker runs: the
+    // IDE's sandbox, a read-only container whose /tmp cannot hold executables, can run it.
     if (run)
     {
         llvm::InitializeNativeTarget();
@@ -199,6 +208,19 @@ int main(int argc, char** argv)
             llvm::errs() << "nova-compile: error: compiling to machine code failed: " << llvm::toString(engine.takeError()) << "\n";
             return 1;
         }
+#if defined(__MINGW32__)
+        // On MinGW, LLVM's code for a function named main begins with a call to __main, GCC's hook that runs the
+        // program's global constructors. This program has run its own, and the JIT runs the module's, so the JIT is
+        // given an empty __main. Code with a large stack frame calls libgcc's stack probe, which is given too.
+        (*engine)->registerSymbols([](llvm::orc::MangleAndInterner interner) {
+            llvm::orc::SymbolMap symbols;
+            symbols[interner("__main")] = {llvm::orc::ExecutorAddr::fromPtr(&nova_jit_main_hook),
+                                           llvm::JITSymbolFlags::Exported};
+            symbols[interner("___chkstk_ms")] = {llvm::orc::ExecutorAddr::fromPtr(&___chkstk_ms),
+                                                 llvm::JITSymbolFlags::Exported};
+            return symbols;
+        });
+#endif
         int32_t status = 0;
         llvm::SmallVector<void*> packed{&status};  // the packed wrapper's arguments: main has none, then its result
         if (llvm::Error e = (*engine)->invokePacked("main", packed))
