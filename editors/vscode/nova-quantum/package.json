@@ -93,8 +93,8 @@
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20 --sourcemap",
     "typecheck": "tsc --noEmit",
     "test:grammar": "vscode-tmgrammar-test -g syntaxes/openqasm.tmLanguage.json \"test/grammar/*.qasm\"",
-    "test:unit": "tsc -p test && mocha test/out/unit/*.test.js",
-    "test:extension": "tsc -p test && node test/out/runTests.js",
+    "test:unit": "tsc -p test && mocha test/out/test/unit/*.test.js",
+    "test:extension": "tsc -p test && node test/out/test/runTests.js",
     "vscode:prepublish": "npm run build -- --minify",
     "package": "vsce package --no-dependencies"
   },

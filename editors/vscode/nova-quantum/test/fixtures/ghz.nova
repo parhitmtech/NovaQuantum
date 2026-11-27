@@ -1,0 +1,8 @@
+ignite:
+    qubit a = qpu.alloc()
+    qubit b = qpu.alloc()
+    qubit c = qpu.alloc()
+    qpu.h(a)
+    qpu.cx(a, b)
+    qpu.cx(b, c)
+    qpu.probs(a, b, c)
