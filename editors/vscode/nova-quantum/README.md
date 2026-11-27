@@ -28,8 +28,10 @@ ignite:                                 # quantum teleportation
 Installing Nova Quantum also installs the **Nova Compiler** extension, which provides the Nova language
 itself (errors as you type, hover, completion).
 
-> **Preview.** The extension is a pre-release, and needs Nova's quantum compiler on your machine for now (see
-> [Requirements](#requirements)).
+> **Preview.** The extension is a pre-release, for Linux (x64) and Windows (x64).
+
+**New to it?** [Getting started](https://github.com/parhitmtech/NovaQuantum/blob/main/docs/GETTING_STARTED.md#7-a-first-quantum-program)
+walks through a first circuit: its compiled numbers, running it, and the compiled circuit at each stage.
 
 ## Features
 
@@ -46,28 +48,40 @@ itself (errors as you type, hover, completion).
 
 ## Requirements
 
-The extension runs `nova-compile` and `nova-translate`, Nova's quantum compiler and its OpenQASM translator, built
-on LLVM and MLIR 20. Build them from [the repository](https://github.com/parhitmtech/NovaQuantum):
+None on Linux (x64) and Windows (x64): the extension ships `nova-compile` and `nova-translate`, Nova's quantum
+compiler and its OpenQASM translator, with LLVM and MLIR 20 built in, so they run with nothing else installed.
+
+To use tools you built yourself instead (a newer compiler, say), build them from
+[the repository](https://github.com/parhitmtech/NovaQuantum) and set their paths below:
 
 ```bash
 cmake -G Ninja -S compiler/mlir -B build/mlir -DMLIR_DIR=/usr/lib/llvm-20/lib/cmake/mlir
 ninja -C build/mlir nova-compile nova-translate
 ```
 
-Then put `build/mlir/bin` on your `PATH`, or set the paths below.
-
 ## Settings
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `novaQuantum.compiler.path` | the one on `PATH` | `nova-compile` |
-| `novaQuantum.translate.path` | the one on `PATH` | `nova-translate`, for Export as OpenQASM |
+| `novaQuantum.compiler.path` | the one shipped | `nova-compile` |
+| `novaQuantum.translate.path` | the one shipped | `nova-translate`, for Export as OpenQASM |
 | `novaQuantum.codeLens.enabled` | `true` | Show each circuit's compiled numbers above it |
 
 ## Workspace Trust
 
 In a folder you have not trusted, Nova Quantum still compiles circuits to show their errors and numbers (compiling
 runs none of your code), but runs no program, and the folder's settings cannot change which tools are used.
+
+## Troubleshooting
+
+| What you see | What to do |
+|---|---|
+| No numbers above a circuit | Numbers appear above code that uses qubits, in a `.nova` or `.qasm` file; check `novaQuantum.codeLens.enabled`. |
+| "Nova's quantum compiler (nova-compile) was not found", or "nova-translate was not found" | `novaQuantum.compiler.path` or `novaQuantum.translate.path` names a file that does not exist: clear it, and the extension uses the one it ships. |
+| Nova's own errors, hover or completion missing | Those come from the **Nova Compiler** extension, installed with this one: see its troubleshooting. |
+
+For anything else, please [report it](https://github.com/parhitmtech/NovaQuantum/issues) with the circuit, if you
+can share it.
 
 ## Links
 

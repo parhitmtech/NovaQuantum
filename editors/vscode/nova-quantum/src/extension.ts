@@ -179,8 +179,8 @@ function compilerOrComplain(context: vscode.ExtensionContext): string | undefine
   const tool = findTool(context, 'compiler.path', 'nova-compile');
   if (!tool) {
     void vscode.window.showErrorMessage(
-      "Nova's quantum compiler (nova-compile) was not found. Build it (see the extension's README) and set " +
-        'novaQuantum.compiler.path.', 'Open Settings').then(choice => {
+      "Nova's quantum compiler (nova-compile) was not found. If novaQuantum.compiler.path is set, check it, or clear " +
+        'it to use the one the extension ships.', 'Open Settings').then(choice => {
       if (choice) vscode.commands.executeCommand('workbench.action.openSettings', 'novaQuantum.compiler.path');
     });
   }
