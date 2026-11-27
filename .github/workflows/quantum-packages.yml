@@ -1,8 +1,9 @@
 # The Nova Quantum extension's packages, with nova-compile and nova-translate inside, linked to run with nothing else
 # installed. They link LLVM and MLIR, so LLVM and MLIR 20 are built here from source, as static libraries without the
-# optional system libraries (libxml2, zstd, zlib, libedit, libffi), and cached: the first run builds them (about two
-# hours), later runs restore them. Called by CI and by the Nova Quantum release. Each package is kept as an artifact
-# named nova-quantum-<target>.vsix.
+# optional system libraries (libxml2, zstd, zlib, libedit, libffi), and cached: the first run on a platform builds
+# them (about an hour and a half on Linux, longer on Windows), later runs restore them. Linux builds with the system's
+# GCC on Ubuntu 22.04; Windows with MinGW-w64 (MSYS2 UCRT64), fully static. Called by CI and by the Nova Quantum
+# release. Each package is kept as an artifact named nova-quantum-<target>.vsix.
 name: Nova Quantum packages
 
 on:
@@ -18,24 +19,44 @@ jobs:
   package:
     name: Nova Quantum package (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 330
+    timeout-minutes: 350
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-22.04         # an older glibc, so the package runs on older Linux distributions too
             target: linux-x64
+            shell: bash
+            exe: ''
+            # the C++ runtime inside; -s: no symbols (the package is a third of the size)
+            link: -static-libstdc++ -static-libgcc -s
+          - os: windows-2022
+            target: win32-x64
+            shell: msys2 {0}
+            exe: .exe
+            link: -static -s
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
-      - name: Tools for the build
+      - name: Tools for the build (Linux)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build
+      - name: Tools for the build (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python tar xz curl
 
-      # LLVM and MLIR, static, built once per version and platform
-      # restored, and saved right after it is built (not at the end of the job: a later step that fails must not
-      # throw away hours of build)
+      # LLVM and MLIR, static, built once per version and platform: restored, and saved right after it is built (not
+      # at the end of the job: a later step that fails must not throw away hours of build)
       - id: llvm-cache
         uses: actions/cache/restore@v6
         with:
@@ -44,10 +65,15 @@ jobs:
       - name: Build LLVM and MLIR ${{ env.LLVM_VERSION }} (static; the first run only)
         if: steps.llvm-cache.outputs.cache-hit != 'true'
         run: |
-          curl -sSfL "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VERSION/llvm-project-$LLVM_VERSION.src.tar.xz" \
-            | tar -xJ
-          cmake -G Ninja -S "llvm-project-$LLVM_VERSION.src/llvm" -B llvm-build \
-            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/llvm-install" \
+          ws=$(echo "$GITHUB_WORKSPACE" | sed 's|\\|/|g')
+          src="llvm-project-$LLVM_VERSION.src"
+          curl -sSfL -o llvm.tar.xz \
+            "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LLVM_VERSION/$src.tar.xz"
+          # only what LLVM and MLIR need (the rest of the tree has symbolic links Windows does not like)
+          tar -xJf llvm.tar.xz "$src/llvm" "$src/mlir" "$src/cmake" "$src/third-party"
+          rm llvm.tar.xz
+          cmake -G Ninja -S "$src/llvm" -B llvm-build \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$ws/llvm-install" \
             -DLLVM_ENABLE_PROJECTS=mlir -DLLVM_TARGETS_TO_BUILD=X86 -DLLVM_ENABLE_RTTI=ON \
             -DLLVM_BUILD_TOOLS=OFF -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF \
             -DLLVM_INCLUDE_DOCS=OFF -DMLIR_INCLUDE_TESTS=OFF -DMLIR_INCLUDE_INTEGRATION_TESTS=OFF \
@@ -55,7 +81,7 @@ jobs:
             -DLLVM_ENABLE_LIBPFM=OFF -DLLVM_ENABLE_FFI=OFF -DLLVM_ENABLE_TERMINFO=OFF \
             -DLLVM_BUILD_LLVM_DYLIB=OFF -DLLVM_LINK_LLVM_DYLIB=OFF -DLLVM_PARALLEL_LINK_JOBS=2
           ninja -C llvm-build install
-          rm -rf llvm-build "llvm-project-$LLVM_VERSION.src"
+          rm -rf llvm-build "$src"
       - name: Keep LLVM and MLIR for the next runs
         if: steps.llvm-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
@@ -66,11 +92,14 @@ jobs:
       # The tools, against that LLVM, with the C++ runtime linked in
       - name: Build nova-compile and nova-translate
         run: |
+          ws=$(echo "$GITHUB_WORKSPACE" | sed 's|\\|/|g')
           cmake -G Ninja -S compiler/mlir -B build/mlir -DCMAKE_BUILD_TYPE=Release \
-            -DMLIR_DIR="$GITHUB_WORKSPACE/llvm-install/lib/cmake/mlir" -DLLVM_EXTERNAL_LIT=/bin/true \
-            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
+            -DMLIR_DIR="$ws/llvm-install/lib/cmake/mlir" -DLLVM_EXTERNAL_LIT=/bin/true \
+            -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.link }}"
           ninja -C build/mlir nova-compile nova-translate
-      - name: Nothing but the C library to find at run time
+          ls -l build/mlir/bin
+      - name: Nothing but the system's own libraries to find at run time (Linux)
+        if: runner.os == 'Linux'
         run: |
           for f in build/mlir/bin/nova-compile build/mlir/bin/nova-translate; do
             ldd "$f"
@@ -78,31 +107,67 @@ jobs:
               echo "::error::$f needs a library the package does not ship"; exit 1
             fi
           done
+      - name: Nothing but the system's own libraries to find at run time (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          for f in build/mlir/bin/nova-compile.exe build/mlir/bin/nova-translate.exe; do
+            objdump -p "$f" | grep "DLL Name"
+            if objdump -p "$f" | grep -iE "DLL Name: (libstdc|libgcc|libwinpthread|libLLVM|libMLIR|libz|libzstd|libxml)"; then
+              echo "::error::$f needs a DLL the package does not ship"; exit 1
+            fi
+          done
+      # bash, not MSYS2's shell: the tools must run with nothing from the build on the PATH
       - name: The tools work (a circuit compiled for the hardware and run; a Nova program; the OpenQASM export)
+        shell: bash
         run: |
           B=build/mlir/bin
-          $B/nova-compile examples/quantum/ghz.qasm --run --hardware --qnova-stats 2>stats.txt | tee out.txt
+          $B/nova-compile${{ matrix.exe }} examples/quantum/ghz.qasm --run --hardware --qnova-stats 2>stats.txt | tee out.txt \
+            || { s=$?; echo "::error::nova-compile failed (exit status $s)"; cat stats.txt; exit 1; }
           grep -q "|000>: 0.5000" out.txt && grep -q "|111>: 0.5000" out.txt && grep -q "atom-timing @main" stats.txt
-          NOVA_SEED=3 $B/nova-compile examples/quantum/teleport.nova --run | tee tele.txt
+          NOVA_SEED=3 $B/nova-compile${{ matrix.exe }} examples/quantum/teleport.nova --run | tee tele.txt
           grep -q "|1>: 0.7500" tele.txt
-          $B/nova-compile examples/quantum/teleport.nova --logical --emit=mlir > /dev/null
+          $B/nova-compile${{ matrix.exe }} examples/quantum/teleport.nova --logical --emit=mlir > /dev/null
           printf 'ignite:\n    qubit a = qpu.alloc()\n    qubit b = qpu.alloc()\n    qpu.h(a)\n    qpu.cx(a, b)\n    qpu.probs(a, b)\n' > bell.nova
-          $B/nova-compile bell.nova --logical --emit=mlir > bell.mlir && $B/nova-translate --qnova-to-openqasm bell.mlir | tee bell.qasm
+          $B/nova-compile${{ matrix.exe }} bell.nova --logical --emit=mlir > bell.mlir
+          $B/nova-translate${{ matrix.exe }} --qnova-to-openqasm bell.mlir | tee bell.qasm
           grep -q "OPENQASM 3" bell.qasm
+      # the tools, kept for a few days when a check of them fails, to run and debug them on the platform
+      - name: Keep the tools that failed
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nova-quantum-tools-${{ matrix.target }}
+          path: |
+            build/mlir/bin/nova-compile${{ matrix.exe }}
+            build/mlir/bin/nova-translate${{ matrix.exe }}
+            stats.txt
+          retention-days: 3
+          if-no-files-found: ignore
 
       - name: Package
+        shell: bash
         run: |
           (cd editors/vscode/nova && npm ci && npm run build)
           cd editors/vscode/nova-quantum
           npm ci
           node scripts/bundle.js ${{ matrix.target }} "$GITHUB_WORKSPACE/build/mlir/bin"
           npx vsce package --target ${{ matrix.target }} --no-dependencies -o nova-quantum-${{ matrix.target }}.vsix
-          zipinfo nova-quantum-${{ matrix.target }}.vsix | grep -E "extension/bin/" | tee /dev/stderr | awk '{ if ($1 !~ /^-rwx/) exit 1 }'
-          python3 -c "import zipfile, sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" \
+          python -c "import zipfile, sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" \
             nova-quantum-${{ matrix.target }}.vsix unpacked
-      - name: The package in VS Code, as installed
+          ls -l nova-quantum-${{ matrix.target }}.vsix
+      - name: The package's tools are executable (Linux)
+        if: runner.os == 'Linux'
+        working-directory: editors/vscode/nova-quantum
+        run: zipinfo nova-quantum-linux-x64.vsix | grep -E "extension/bin/" | tee /dev/stderr | awk '{ if ($1 !~ /^-rwx/) exit 1 }'
+      - name: The package in VS Code, as installed (Linux)
+        if: runner.os == 'Linux'
         working-directory: editors/vscode/nova-quantum
         run: NOVA_TEST_BUNDLED=1 NOVA_TEST_EXTENSION_PATH="$PWD/unpacked/extension" xvfb-run -a npm run test:extension
+      - name: The package in VS Code, as installed (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        working-directory: editors/vscode/nova-quantum
+        run: NOVA_TEST_BUNDLED=1 NOVA_TEST_EXTENSION_PATH="$(cygpath -w "$PWD/unpacked/extension")" npm run test:extension
       - uses: actions/upload-artifact@v7
         with:
           name: nova-quantum-${{ matrix.target }}.vsix
