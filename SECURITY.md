@@ -4,7 +4,7 @@
 
 | Component | Supported |
 |---|---|
-| Nova Compiler and Nova Quantum extensions for VS Code | the latest release |
+| Nova Compiler and Nova Quantum Compiler extensions for VS Code | the latest release |
 | The Nova compiler and interpreter, `nova-compile` and `nova-translate` (`main`) | yes |
 | The NovaComp cloud IDE (`main`) | yes |
 

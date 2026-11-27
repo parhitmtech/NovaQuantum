@@ -1,4 +1,4 @@
-# Nova Quantum
+# Nova Quantum Compiler
 
 **Nova Quantum** compiles quantum programs for **neutral-atom quantum computers**. Write circuits in
 [Nova](https://marketplace.visualstudio.com/items?itemName=parhitmathur.nova-programming-language) (a `qubit` type, `qpu` gates, classical

@@ -585,7 +585,7 @@ server/      Node.js + Express backend: auth, execution, workspace, NovaBot
 frontend/    React + Vite IDE
 examples/    Nova example programs
 docs/        the documents above; docs/assets holds the README's graphics
-editors/     the VS Code extensions: Nova Compiler (vscode/nova), Nova Quantum (vscode/nova-quantum)
+editors/     the VS Code extensions: Nova Compiler (vscode/nova), Nova Quantum Compiler (vscode/nova-quantum)
 deploy/      Docker Compose and deploy script for the EC2 host
 tools/       SOL tunnel scripts, syntax migration scripts, the README graphics generator
 ```
