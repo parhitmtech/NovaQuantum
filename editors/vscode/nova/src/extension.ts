@@ -46,11 +46,14 @@ async function startServer(context: vscode.ExtensionContext): Promise<void> {
   const server = findTool(context, 'server.path', 'nova-lsp');
   if (!server) {
     setStatus('$(error) Nova', 'nova-lsp was not found: set nova.server.path', true);
-    const choice = await vscode.window.showWarningMessage(
+    // Not awaited: the message stays until it is dismissed, and activation (which extensions that depend on this one,
+    // such as Nova Quantum, wait for) must not wait with it
+    void vscode.window.showWarningMessage(
       "Nova's language server (nova-lsp) was not found, so errors are not shown as you type. Build it with " +
         "'make -C compiler lsp' and set its path in the setting nova.server.path.",
-      'Open Settings');
-    if (choice === 'Open Settings') vscode.commands.executeCommand('workbench.action.openSettings', 'nova.server.path');
+      'Open Settings').then(choice => {
+      if (choice === 'Open Settings') vscode.commands.executeCommand('workbench.action.openSettings', 'nova.server.path');
+    });
     return;
   }
   const home = novaHome(context);
