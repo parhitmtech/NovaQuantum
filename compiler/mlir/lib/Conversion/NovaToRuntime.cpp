@@ -109,8 +109,14 @@ struct PrintLowering : mlir::OpConversionPattern<nova::PrintOp>
                                         mlir::ConversionPatternRewriter& rewriter) const override
     {
         mlir::Value x = adaptor.getValue();
+        if (!x)  // print(): an empty line
+        {
+            call_runtime(rewriter, op, "nova_print_newline", {}, mlir::ValueRange{});
+            rewriter.eraseOp(op);
+            return mlir::success();
+        }
         mlir::Type t = x.getType();
-        llvm::StringRef name;
+        std::string name;
         if (t.isInteger(1))  // a bool prints as the int 1 or 0
         {
             t = rewriter.getI32Type();
@@ -121,6 +127,9 @@ struct PrintLowering : mlir::OpConversionPattern<nova::PrintOp>
         else if (t.isF32()) name = "nova_print_f32";
         else if (t.isF64()) name = "nova_print_f64";
         else return rewriter.notifyMatchFailure(op, "no runtime print for this type yet");
+        // print(a, b) before the last: a space after it, not a newline (a tensor ends its own line either way, as
+        // the interpreter's TEN_PRINT)
+        if (op.getContinues() && name != "nova_print_tensor") name += "_sp";
         call_runtime(rewriter, op, name, {}, x);
         rewriter.eraseOp(op);
         return mlir::success();

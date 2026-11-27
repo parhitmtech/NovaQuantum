@@ -193,7 +193,7 @@ You need LLVM/MLIR 20 (with `clang-20`), CMake, Ninja and `lit`. On Ubuntu, inst
 git clone https://github.com/parhitmtech/NovaQuantum.git && cd NovaQuantum
 cmake -G Ninja -S compiler/mlir -B build/mlir -DMLIR_DIR=/usr/lib/llvm-20/lib/cmake/mlir \
       -DLLVM_EXTERNAL_LIT=$(command -v lit)
-ninja -C build/mlir check-nova                                        # 42 lit tests
+ninja -C build/mlir check-nova                                        # 44 lit tests
 
 build/mlir/bin/nova-compile compiler/mlir/test/Run/tensors.nova -o t && ./t      # Nova to a native executable
 build/mlir/bin/nova-compile compiler/mlir/test/Run/quantum.mlir --qnova-stats -o q && ./q   # a circuit
