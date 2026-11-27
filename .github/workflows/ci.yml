@@ -310,6 +310,11 @@ jobs:
             echo "::error::sources, tests or dependencies leaked into the package"; exit 1
           fi
 
+  # The packages people install, one per platform (.github/workflows/package.yml, which releases use too)
+  vscode-packages:
+    name: VS Code packages
+    uses: ./.github/workflows/package.yml
+
   e2e:
     name: Frontend e2e (Playwright)
     runs-on: ubuntu-24.04

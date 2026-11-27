@@ -42,12 +42,22 @@ Tokens expire (Azure DevOps allows at most a year): put the renewal date in a ca
 
 ## Building a package locally
 
+Each platform has its own package, with Nova's tools inside it (`bin/nova`, `bin/nova-lsp`, `stdlib/`):
+
 ```bash
+make -C compiler CXXFLAGS="-O2 -static-libstdc++ -static-libgcc"        # Windows (MSYS2 UCRT64): CXXFLAGS="-O2 -static"
+make -C compiler lsp CXXFLAGS="-O2 -static-libstdc++ -static-libgcc"
 cd editors/vscode/nova
 npm ci
-npm run package                                   # writes nova-<version>.vsix
-code --install-extension nova-<version>.vsix      # try it in your own VS Code
+node scripts/bundle.js linux-x64                                       # or win32-x64
+npx vsce package --target linux-x64 --no-dependencies -o nova-linux-x64.vsix
+code --install-extension nova-linux-x64.vsix                           # try it in your own VS Code
 ```
+
+CI does the same on every pull request (the "VS Code package" jobs): it builds the tools on Ubuntu 22.04 (an
+older glibc) and on Windows with MinGW-w64 linked statically, checks that they need no C++ runtime at run time,
+runs the golden and language server tests with them, packages, unpacks the package, and runs the extension's tests
+in VS Code against it. The packages are kept as the run's artifacts.
 
 ## Versions
 
@@ -57,13 +67,31 @@ code --install-extension nova-<version>.vsix      # try it in your own VS Code
   versions** (0.1.x, 0.3.x) and releases even ones, as Microsoft recommends.
 - Every release updates `CHANGELOG.md` in the extension's folder; the Marketplace shows it.
 
-## Publishing (until the release workflow exists)
+## Releasing
 
-```bash
-cd editors/vscode/nova
-npx vsce publish --pre-release            # uses the token from `vsce login`
-npx ovsx publish nova-<version>.vsix -p <OVSX token>
-```
+A release is a tag. To release the Nova extension:
 
-Phase 6 of the roadmap replaces this with a workflow: a `nova-v*` tag builds the per-platform packages (with the
-compiler and language server inside), tests them, and publishes to both marketplaces.
+1. Set the version in `editors/vscode/nova/package.json`, and add its entry to `CHANGELOG.md` (a heading
+   `## [0.3.0] ...`). An odd minor version (0.3, 0.5) is a pre-release.
+2. Merge that, then tag the commit and push the tag:
+
+   ```bash
+   git tag nova-v0.3.0
+   git push origin nova-v0.3.0
+   ```
+
+The workflow **Release the Nova extension** (`.github/workflows/release.yml`) then:
+
+1. checks that the tag matches the version, and that the changelog has the version's entry;
+2. builds and tests the package for each platform, exactly as CI does (`.github/workflows/package.yml`);
+3. makes a GitHub release with the packages attached, its notes the version's changelog entry (the packages install
+   from there too: `code --install-extension nova-linux-x64.vsix`);
+4. publishes them to the VS Code Marketplace and to Open VSX (as a pre-release for an odd minor version).
+
+Step 4 needs the secrets `VSCE_PAT` and `OVSX_PAT` (above); without them it stops and says which one to add, after
+the GitHub release is made. To try a release without publishing, run the workflow by hand (Actions > Release the
+Nova extension > Run workflow): it checks the version and builds and tests the packages. Ticking **publish**
+publishes them as well.
+
+Nova Quantum is released the same way from its repository, with a tag `nova-quantum-v<version>`. It depends on the
+Nova extension, so release Nova first: the Marketplace refuses an extension whose dependency it does not have.
