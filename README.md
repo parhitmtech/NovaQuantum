@@ -8,8 +8,10 @@
 ![Neutral atoms](https://img.shields.io/badge/quantum-neutral%20atoms-76dac4?style=flat-square)
 ![CUDA and Triton](https://img.shields.io/badge/GPU-CUDA%20%C2%B7%20Triton-f5a6b1?style=flat-square)
 ![Tests](https://img.shields.io/badge/tests-lit%20%C2%B7%20differential-7cb8f2?style=flat-square)
+[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code%20Marketplace-Nova%20Quantum%20Compiler-007acc?style=flat-square&logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=parhitmathur.nova-quantum)
+[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code%20Marketplace-Nova%20Compiler-007acc?style=flat-square&logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=parhitmathur.nova-programming-language)
 
-[Native code](#-nova-to-native-code-through-mlir-and-llvm) · [Quantum](#%EF%B8%8F-quantum-circuits-for-neutral-atom-hardware) ·
+**[Install](#-install)** · [Native code](#-nova-to-native-code-through-mlir-and-llvm) · [Quantum](#%EF%B8%8F-quantum-circuits-for-neutral-atom-hardware) ·
 [Try it](#%EF%B8%8F-try-it) · [The Nova language](#-the-nova-language) · [Design: quantum](docs/QUANTUM.md) ·
 [Technical report](docs/paper/novaquantum.tex) · [Roadmap](docs/ROADMAP.md)
 
@@ -36,6 +38,20 @@ interpreter, the CUDA and Triton matmul kernels, and the NovaComp cloud IDE are 
 
 > 📄 **Technical report:** [docs/paper/novaquantum.tex](docs/paper/novaquantum.tex): the design, the methodology,
 > how each result is checked, and the measured results, in one paper (LaTeX; compiles as is on Overleaf).
+
+## 📦 Install
+
+Both compilers come as VS Code extensions, with everything inside (LLVM and MLIR included): nothing else to
+install, on Linux (x64) and Windows (x64).
+
+| Extension | For | Install |
+|---|---|---|
+| **Nova Quantum Compiler** | Quantum circuits in Nova or OpenQASM 3, compiled for neutral-atom hardware: each circuit's compiled cost above it, the circuit at each stage, Run on the simulator, OpenQASM export | [Marketplace](https://marketplace.visualstudio.com/items?itemName=parhitmathur.nova-quantum) · `code --install-extension parhitmathur.nova-quantum --pre-release` |
+| **Nova Compiler** | The Nova language: errors as you type, quick fixes, hover, completion, Run, the REPL (installed with Nova Quantum Compiler) | [Marketplace](https://marketplace.visualstudio.com/items?itemName=parhitmathur.nova-programming-language) · [Open VSX](https://open-vsx.org/extension/parhitmathur/nova-programming-language) |
+
+**[Getting started](docs/GETTING_STARTED.md)** goes from installing to a first program and
+[a first quantum circuit](docs/GETTING_STARTED.md#7-a-first-quantum-program). To build the compilers from source,
+see [Try it](#%EF%B8%8F-try-it).
 
 ## 🧩 Nova to native code, through MLIR and LLVM
 
@@ -556,6 +572,7 @@ The full plan is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 | Doc | For |
 |---|---|
+| [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) | Installing the VS Code extensions, a first program, its errors, the REPL, a first quantum circuit |
 | [docs/QUANTUM.md](docs/QUANTUM.md) | Compiling quantum circuits for a neutral-atom machine: the qnova dialect, its passes, the physics behind each rewrite |
 | [docs/SYNTAX.md](docs/SYNTAX.md) | The Nova language |
 | [docs/PYTHON.md](docs/PYTHON.md) | How Nova's semantics differ from Python's, and how its interpreter differs from CPython |
