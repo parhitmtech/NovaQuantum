@@ -1,6 +1,6 @@
 {
   "name": "nova-quantum",
-  "displayName": "Nova Quantum",
+  "displayName": "Nova Quantum Compiler",
   "description": "Quantum programs in Nova and OpenQASM 3, compiled through MLIR for neutral-atom hardware.",
   "version": "0.3.0",
   "preview": true,
