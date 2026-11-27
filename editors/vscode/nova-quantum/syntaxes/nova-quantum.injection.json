@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "comment": "Nova's quantum words in .nova files (the Nova extension's grammar does not know them): the qubit type, and the qpu module and its gates",
+  "scopeName": "source.nova.quantum",
+  "injectionSelector": "L:source.nova -comment -string",
+  "patterns": [
+    { "name": "storage.type.primitive.quantum.nova", "match": "\\bqubit\\b" },
+    {
+      "match": "\\b(qpu)\\s*(\\.)\\s*(alloc|h|x|y|z|s|t|rx|ry|rz|cx|cz|swap|cp|measure|probs)\\b",
+      "captures": {
+        "1": { "name": "entity.name.namespace.quantum.nova" },
+        "2": { "name": "punctuation.accessor.nova" },
+        "3": { "name": "support.function.gate.quantum.nova" }
+      }
+    },
+    { "name": "entity.name.namespace.quantum.nova", "match": "\\bqpu\\b" }
+  ]
+}

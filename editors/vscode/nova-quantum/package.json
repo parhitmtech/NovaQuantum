@@ -2,7 +2,7 @@
   "name": "nova-quantum",
   "displayName": "Nova Quantum",
   "description": "Quantum programs in Nova and OpenQASM 3, compiled through MLIR for neutral-atom hardware.",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "preview": true,
   "publisher": "parhitmathur",
   "license": "Apache-2.0",
@@ -11,10 +11,20 @@
   "homepage": "https://github.com/parhitmtech/NovaQuantum#readme",
   "repository": { "type": "git", "url": "https://github.com/parhitmtech/NovaQuantum.git", "directory": "editors/vscode/nova-quantum" },
   "bugs": { "url": "https://github.com/parhitmtech/NovaQuantum/issues" },
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["Programming Languages"],
-  "keywords": ["quantum", "openqasm", "qasm", "neutral atom", "nova", "mlir", "compiler", "qubit"],
+  "engines": { "vscode": "^1.91.0" },
+  "categories": ["Programming Languages", "Linters"],
+  "keywords": ["quantum", "openqasm", "qasm", "neutral atom", "qubit", "nova", "mlir", "compiler", "simulator"],
   "extensionDependencies": ["parhitmathur.nova"],
+  "main": "./dist/extension.js",
+  "activationEvents": ["onLanguage:nova"],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In an untrusted folder, Nova Quantum compiles circuits to show their errors and numbers, but runs no program, and the folder cannot change which tools are used.",
+      "restrictedConfigurations": ["novaQuantum.compiler.path", "novaQuantum.translate.path"]
+    },
+    "virtualWorkspaces": { "supported": false, "description": "Nova's quantum tools read files from disk." }
+  },
   "contributes": {
     "languages": [
       {
@@ -24,12 +34,79 @@
         "firstLine": "^\\s*OPENQASM\\s",
         "configuration": "./openqasm-configuration.json"
       }
-    ]
+    ],
+    "grammars": [
+      { "language": "openqasm", "scopeName": "source.openqasm", "path": "./syntaxes/openqasm.tmLanguage.json" },
+      { "scopeName": "source.nova.quantum", "path": "./syntaxes/nova-quantum.injection.json", "injectTo": ["source.nova"] }
+    ],
+    "commands": [
+      { "command": "novaQuantum.runOnSimulator", "title": "Run on Simulator", "category": "Nova Quantum", "icon": "$(play)" },
+      { "command": "novaQuantum.runLogical", "title": "Run on Simulator as Written (without Compiling for the Machine)", "category": "Nova Quantum" },
+      { "command": "novaQuantum.compileForHardware", "title": "Compile for Hardware and Run", "category": "Nova Quantum" },
+      { "command": "novaQuantum.showCircuit", "title": "Show the Compiled Circuit", "category": "Nova Quantum" },
+      { "command": "novaQuantum.exportOpenQASM", "title": "Export as OpenQASM", "category": "Nova Quantum" }
+    ],
+    "menus": {
+      "editor/title/run": [
+        { "command": "novaQuantum.runOnSimulator", "when": "editorLangId == openqasm && isWorkspaceTrusted", "group": "navigation@0" }
+      ],
+      "editor/context": [
+        { "command": "novaQuantum.runOnSimulator", "when": "(editorLangId == openqasm || editorLangId == nova) && isWorkspaceTrusted", "group": "nova-quantum@1" },
+        { "command": "novaQuantum.compileForHardware", "when": "(editorLangId == openqasm || editorLangId == nova) && isWorkspaceTrusted", "group": "nova-quantum@2" },
+        { "command": "novaQuantum.showCircuit", "when": "editorLangId == openqasm || editorLangId == nova", "group": "nova-quantum@3" }
+      ],
+      "commandPalette": [
+        { "command": "novaQuantum.runOnSimulator", "when": "editorLangId == openqasm || editorLangId == nova" },
+        { "command": "novaQuantum.runLogical", "when": "editorLangId == openqasm || editorLangId == nova" },
+        { "command": "novaQuantum.compileForHardware", "when": "editorLangId == openqasm || editorLangId == nova" },
+        { "command": "novaQuantum.showCircuit", "when": "editorLangId == openqasm || editorLangId == nova" },
+        { "command": "novaQuantum.exportOpenQASM", "when": "editorLangId == nova" }
+      ]
+    },
+    "keybindings": [
+      { "command": "novaQuantum.runOnSimulator", "key": "ctrl+f5", "mac": "cmd+f5", "when": "editorLangId == openqasm" }
+    ],
+    "configuration": {
+      "title": "Nova Quantum",
+      "properties": {
+        "novaQuantum.compiler.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "Nova's quantum compiler, `nova-compile` (MLIR and LLVM). Empty: the one this extension ships, else the one on `PATH`."
+        },
+        "novaQuantum.translate.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "`nova-translate`, which writes a circuit as OpenQASM (**Export as OpenQASM**). Empty: the one this extension ships, else the one on `PATH`."
+        },
+        "novaQuantum.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show each circuit's compiled numbers (native gates, depth, atom moves, time on the machine) above it, with **Run on simulator**."
+        }
+      }
+    }
   },
   "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20 --sourcemap",
+    "typecheck": "tsc --noEmit",
+    "test:grammar": "vscode-tmgrammar-test -g syntaxes/openqasm.tmLanguage.json \"test/grammar/*.qasm\"",
+    "test:unit": "tsc -p test && mocha test/out/test/unit/*.test.js",
+    "test:extension": "tsc -p test && node test/out/test/runTests.js",
+    "vscode:prepublish": "npm run build -- --minify",
     "package": "vsce package --no-dependencies"
   },
   "devDependencies": {
-    "@vscode/vsce": "4.1.0"
+    "@types/mocha": "10.0.10",
+    "@types/node": "22.20.5",
+    "@types/vscode": "1.91.0",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.1.0",
+    "esbuild": "0.28.2",
+    "mocha": "10.8.2",
+    "typescript": "5.9.3",
+    "vscode-tmgrammar-test": "0.1.3"
   }
 }
