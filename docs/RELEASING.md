@@ -93,5 +93,7 @@ the GitHub release is made. To try a release without publishing, run the workflo
 Nova extension > Run workflow): it checks the version and builds and tests the packages. Ticking **publish**
 publishes them as well.
 
-Nova Quantum is released the same way from its repository, with a tag `nova-quantum-v<version>`. It depends on the
-Nova extension, so release Nova first: the Marketplace refuses an extension whose dependency it does not have.
+Nova Quantum is released the same way from its repository, with a tag `nova-quantum-v<version>`: one package per
+platform (Linux and Windows), each with `nova-compile` and `nova-translate` inside, built and tested as CI builds
+them (`quantum-packages.yml`; LLVM and MLIR come from CI's cache, so a release takes minutes, not hours). It depends
+on the Nova extension, so release Nova first: the Marketplace refuses an extension whose dependency it does not have.

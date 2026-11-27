@@ -1,8 +1,12 @@
 # Releases the Nova Quantum extension. Pushing a tag nova-quantum-v<version> (the version in
-# editors/vscode/nova-quantum/package.json) checks the version, builds and tests the package, makes a GitHub release
-# with it, and publishes it to the VS Code Marketplace and Open VSX (a pre-release for an odd minor version).
+# editors/vscode/nova-quantum/package.json):
+#   1. checks the version: the tag matches package.json, and CHANGELOG.md has its entry; the unit and grammar tests;
+#   2. builds and tests the packages for each platform, with nova-compile and nova-translate inside, exactly as CI
+#      does (quantum-packages.yml; LLVM and MLIR come from CI's cache);
+#   3. makes a GitHub release with the packages attached;
+#   4. publishes them to the VS Code Marketplace and Open VSX, as a pre-release when the minor version is odd.
 # Nova Quantum depends on the Nova extension, so Nova must be published first (docs/RELEASING.md). Run by hand, it
-# is a dry run unless "publish" is ticked. Publishing needs the secrets VSCE_PAT and OVSX_PAT.
+# does steps 1 and 2 only, unless "publish" is ticked. Publishing needs the secrets VSCE_PAT and OVSX_PAT.
 name: Release the Nova Quantum extension
 
 on:
@@ -23,8 +27,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  package:
-    name: Version, tests and package
+  version:
+    name: The version to release
     if: github.repository == 'parhitmtech/NovaQuantum'
     runs-on: ubuntu-24.04
     outputs:
@@ -54,23 +58,23 @@ jobs:
       - run: npm run typecheck
       - run: npm run test:grammar
       - run: npm run test:unit
-      # a pre-release package for a pre-release: vsce publishes --pre-release only from a package built as one
-      - run: npx vsce package --no-dependencies $([ "${{ steps.check.outputs.prerelease }}" = true ] && echo --pre-release) -o nova-quantum.vsix
-      - uses: actions/upload-artifact@v7
-        with:
-          name: nova-quantum.vsix
-          path: editors/vscode/nova-quantum/nova-quantum.vsix
+
+  package:
+    needs: version
+    uses: ./.github/workflows/quantum-packages.yml
+    with:
+      prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
 
   release:
-    name: Release ${{ needs.package.outputs.version }}
-    needs: package
+    name: Release ${{ needs.version.outputs.version }}
+    needs: [version, package]
     if: github.ref_type == 'tag' || inputs.publish
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
-      VERSION: ${{ needs.package.outputs.version }}
-      PRERELEASE: ${{ needs.package.outputs.prerelease }}
+      VERSION: ${{ needs.version.outputs.version }}
+      PRERELEASE: ${{ needs.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -78,16 +82,20 @@ jobs:
           node-version-file: .nvmrc
       - uses: actions/download-artifact@v7
         with:
-          name: nova-quantum.vsix
+          pattern: nova-quantum-*.vsix
+          merge-multiple: true
           path: packages
-      - name: GitHub release, with the package attached
+      - name: The packages
+        run: ls -l packages && test "$(ls packages/*.vsix | wc -l)" -ge 2
+      - name: GitHub release, with the packages attached
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # the release notes: this version's section of CHANGELOG.md
           awk -v h="## [$VERSION]" 'index($0, h) == 1 {on=1; next} on && /^## \[/ {exit} on' \
             editors/vscode/nova-quantum/CHANGELOG.md > notes.md
-          gh release create "$GITHUB_REF_NAME" packages/nova-quantum.vsix --title "Nova Quantum extension $VERSION" \
+          gh release create "$GITHUB_REF_NAME" packages/*.vsix --title "Nova Quantum extension $VERSION" \
             --notes-file notes.md $([ "$PRERELEASE" = true ] && echo --prerelease)
       - name: Publish to the VS Code Marketplace
         env:
@@ -97,7 +105,7 @@ jobs:
             echo "::error::the secret VSCE_PAT is not set: add the Azure DevOps token (Settings > Secrets and variables > Actions; docs/RELEASING.md)"
             exit 1
           fi
-          npx --yes @vscode/vsce@4.1.0 publish --packagePath packages/nova-quantum.vsix $([ "$PRERELEASE" = true ] && echo --pre-release)
+          npx --yes @vscode/vsce@4.1.0 publish --packagePath packages/*.vsix $([ "$PRERELEASE" = true ] && echo --pre-release)
       - name: Publish to Open VSX
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
@@ -106,4 +114,6 @@ jobs:
             echo "::error::the secret OVSX_PAT is not set: add the Open VSX token (Settings > Secrets and variables > Actions; docs/RELEASING.md)"
             exit 1
           fi
-          npx --yes ovsx@1.4.0 publish packages/nova-quantum.vsix $([ "$PRERELEASE" = true ] && echo --pre-release)
+          for p in packages/*.vsix; do
+            npx --yes ovsx@1.4.0 publish "$p" $([ "$PRERELEASE" = true ] && echo --pre-release)
+          done
