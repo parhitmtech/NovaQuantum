@@ -121,7 +121,8 @@ jobs:
         shell: bash
         run: |
           B=build/mlir/bin
-          $B/nova-compile${{ matrix.exe }} examples/quantum/ghz.qasm --run --hardware --qnova-stats 2>stats.txt | tee out.txt
+          $B/nova-compile${{ matrix.exe }} examples/quantum/ghz.qasm --run --hardware --qnova-stats 2>stats.txt | tee out.txt \
+            || { s=$?; echo "::error::nova-compile failed (exit status $s)"; cat stats.txt; exit 1; }
           grep -q "|000>: 0.5000" out.txt && grep -q "|111>: 0.5000" out.txt && grep -q "atom-timing @main" stats.txt
           NOVA_SEED=3 $B/nova-compile${{ matrix.exe }} examples/quantum/teleport.nova --run | tee tele.txt
           grep -q "|1>: 0.7500" tele.txt
@@ -130,6 +131,18 @@ jobs:
           $B/nova-compile${{ matrix.exe }} bell.nova --logical --emit=mlir > bell.mlir
           $B/nova-translate${{ matrix.exe }} --qnova-to-openqasm bell.mlir | tee bell.qasm
           grep -q "OPENQASM 3" bell.qasm
+      # the tools, kept for a few days when a check of them fails, to run and debug them on the platform
+      - name: Keep the tools that failed
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nova-quantum-tools-${{ matrix.target }}
+          path: |
+            build/mlir/bin/nova-compile${{ matrix.exe }}
+            build/mlir/bin/nova-translate${{ matrix.exe }}
+            stats.txt
+          retention-days: 3
+          if-no-files-found: ignore
 
       - name: Package
         shell: bash
