@@ -109,12 +109,6 @@ struct PrintLowering : mlir::OpConversionPattern<nova::PrintOp>
                                         mlir::ConversionPatternRewriter& rewriter) const override
     {
         mlir::Value x = adaptor.getValue();
-        if (!x)  // print(): an empty line
-        {
-            call_runtime(rewriter, op, "nova_print_newline", {}, mlir::ValueRange{});
-            rewriter.eraseOp(op);
-            return mlir::success();
-        }
         mlir::Type t = x.getType();
         std::string name;
         if (t.isInteger(1))  // a bool prints as the int 1 or 0
@@ -131,6 +125,20 @@ struct PrintLowering : mlir::OpConversionPattern<nova::PrintOp>
         // the interpreter's TEN_PRINT)
         if (op.getContinues() && name != "nova_print_tensor") name += "_sp";
         call_runtime(rewriter, op, name, {}, x);
+        rewriter.eraseOp(op);
+        return mlir::success();
+    }
+};
+
+// nova.newline (print()) is func.call @nova_print_newline()
+struct NewlineLowering : mlir::OpConversionPattern<nova::NewlineOp>
+{
+    using OpConversionPattern::OpConversionPattern;
+
+    mlir::LogicalResult matchAndRewrite(nova::NewlineOp op, OpAdaptor,
+                                        mlir::ConversionPatternRewriter& rewriter) const override
+    {
+        call_runtime(rewriter, op, "nova_print_newline", {}, mlir::ValueRange{});
         rewriter.eraseOp(op);
         return mlir::success();
     }
@@ -476,7 +484,7 @@ struct ConvertNovaToRuntime : mlir::PassWrapper<ConvertNovaToRuntime, mlir::Oper
             [&](mlir::Operation* op) { return converter.isLegal(op); });
 
         mlir::RewritePatternSet patterns(context);
-        patterns.add<PrintLowering, GetLowering, SetLowering, PoisonLowering, CheckDivisorLowering>(converter,
+        patterns.add<PrintLowering, NewlineLowering, GetLowering, SetLowering, PoisonLowering, CheckDivisorLowering>(converter,
                                                                                                    context);
         patterns.add<FillLowering<nova::ZerosOp>>(converter, context, "nova_zeros");
         patterns.add<FillLowering<nova::OnesOp>>(converter, context, "nova_ones");
