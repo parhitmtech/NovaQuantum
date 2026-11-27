@@ -28,4 +28,4 @@ Odd minor versions (0.1, 0.3) are pre-releases.
 - `.qasm` files, and files whose first line is `OPENQASM`, are recognized as OpenQASM.
 - Language configuration for OpenQASM: `//` and `/* */` comments, bracket matching and auto-closing, and indentation
   inside `{ }`.
-- Depends on the Nova Programming Language extension, which installs with it.
+- Depends on the Nova Compiler extension, which installs with it.

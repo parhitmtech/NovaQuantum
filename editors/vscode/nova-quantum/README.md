@@ -25,7 +25,7 @@ ignite:                                 # quantum teleportation
     qpu.probs(c)                         # |1>: 0.7500, whatever was measured
 ```
 
-Installing Nova Quantum also installs the **Nova Programming Language** extension, which provides the Nova language
+Installing Nova Quantum also installs the **Nova Compiler** extension, which provides the Nova language
 itself (errors as you type, hover, completion).
 
 > **Preview.** The extension is a pre-release, and needs Nova's quantum compiler on your machine for now (see
