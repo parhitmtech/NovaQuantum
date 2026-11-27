@@ -13,10 +13,11 @@ async function main() {
   try {
     const code = await runTests({
       version,
-      extensionDevelopmentPath: [root, nova],
+      // NOVA_TEST_EXTENSION_PATH: an unpacked package to test instead of this folder
+      extensionDevelopmentPath: [process.env.NOVA_TEST_EXTENSION_PATH || root, nova],
       extensionTestsPath: path.join(__dirname, 'suite', 'index'),
       launchArgs: [path.join(root, 'test', 'fixtures'), '--disable-extensions', '--disable-workspace-trust'],
-      extensionTestsEnv: { NOVA_QUANTUM_BIN: bin },
+      extensionTestsEnv: { NOVA_QUANTUM_BIN: bin, NOVA_TEST_BUNDLED: process.env.NOVA_TEST_BUNDLED },
     });
     process.exit(code);
   } catch (e) {

@@ -23,7 +23,13 @@ function findTool(context: vscode.ExtensionContext, setting: string, name: strin
   const configured = vscode.workspace.getConfiguration('novaQuantum').get<string>(setting, '').trim();
   if (configured) return fs.existsSync(configured) ? configured : undefined;
   const bundled = context.asAbsolutePath(path.join('bin', exe(name)));
-  if (fs.existsSync(bundled)) return bundled;
+  if (fs.existsSync(bundled)) {
+    // A package unzipped without its file modes leaves the program not executable: mark it again
+    if (process.platform !== 'win32') {
+      try { fs.accessSync(bundled, fs.constants.X_OK); } catch { try { fs.chmodSync(bundled, 0o755); } catch { /* reported when it fails */ } }
+    }
+    return bundled;
+  }
   for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
     if (dir && fs.existsSync(path.join(dir, exe(name)))) return path.join(dir, exe(name));
   }

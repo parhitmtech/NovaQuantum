@@ -31,6 +31,11 @@ suite('Nova Quantum', () => {
   suiteSetup(async () => {
     const bin = process.env.NOVA_QUANTUM_BIN ?? '';
     const config = vscode.workspace.getConfiguration('novaQuantum');
+    // A package under test (NOVA_TEST_BUNDLED) must find its own tools: the settings are cleared
+    if (process.env.NOVA_TEST_BUNDLED) {
+      for (const key of ['compiler.path', 'translate.path']) await config.update(key, undefined, vscode.ConfigurationTarget.Global);
+      return;
+    }
     await config.update('compiler.path', path.join(bin, exe('nova-compile')), vscode.ConfigurationTarget.Global);
     await config.update('translate.path', path.join(bin, exe('nova-translate')), vscode.ConfigurationTarget.Global);
   });
