@@ -11,7 +11,7 @@
 
 [Native code](#-nova-to-native-code-through-mlir-and-llvm) · [Quantum](#%EF%B8%8F-quantum-circuits-for-neutral-atom-hardware) ·
 [Try it](#%EF%B8%8F-try-it) · [The Nova language](#-the-nova-language) · [Design: quantum](docs/QUANTUM.md) ·
-[Roadmap](docs/ROADMAP.md)
+[Technical report](docs/paper/novaquantum.tex) · [Roadmap](docs/ROADMAP.md)
 
 </div>
 
@@ -33,6 +33,9 @@ sandbox and shows the results with the circuit's gate counts and hardware timing
 
 It grows out of [Nova](https://github.com/parhitmtech/Nova), whose full history it carries: the language, its
 interpreter, the CUDA and Triton matmul kernels, and the NovaComp cloud IDE are all here too.
+
+> 📄 **Technical report:** [docs/paper/novaquantum.tex](docs/paper/novaquantum.tex): the design, the methodology,
+> how each result is checked, and the measured results, in one paper (LaTeX; compiles as is on Overleaf).
 
 ## 🧩 Nova to native code, through MLIR and LLVM
 
@@ -148,6 +151,23 @@ long as all the gates, so routing dominates run time on this machine model. "= l
 circuit and the hardware program.
 
 The design, with the physics behind each rewrite, is in **[docs/QUANTUM.md](docs/QUANTUM.md)**.
+
+## 🧑‍💻 Built to be used
+
+A compiler is used through its error messages and its editor support, so both are part of the compiler, not
+afterthoughts:
+
+- **Errors with stable codes and exact ranges.** Every error and warning has a code (`E0502`) explained in
+  [docs/ERRORS.md](docs/ERRORS.md), and points at the exact expression. After a syntax error the parser recovers at
+  the next statement, so one run reports every mistake. Runtime errors show the failing expression and the calls
+  that led to it.
+- **A fuzzed front end.** libFuzzer runs the scanner, parser and type checker on arbitrary input under ASan and
+  UBSan in CI; it found one crash (fixed), then ran 387,899 inputs clean in 10 minutes.
+- **A language server on the compiler's own front end** (`nova-lsp`): the editor shows exactly the compiler's
+  errors, about a millisecond per edit, with hover, go to definition, completion and quick fixes.
+- **VS Code extensions** for Nova and Nova Quantum ([editors/vscode](editors/vscode)): Nova Quantum shows each
+  circuit's compiled cost above it (native gates, depth, atom moves, time on the machine), runs it on the simulator,
+  and shows the circuit at each stage of compilation. Both are tested in a real VS Code in CI.
 
 ## 🛠️ Try it
 
@@ -548,6 +568,7 @@ The full plan is in [docs/ROADMAP.md](docs/ROADMAP.md).
 | [compiler/kernels/triton/IR_WALKTHROUGH.md](compiler/kernels/triton/IR_WALKTHROUGH.md) | Triton's compilation of the matmul, stage by stage |
 | [docs/BENCHMARKS.md](docs/BENCHMARKS.md) | Performance numbers, method, and the issues they found |
 | [docs/COMPARISON.md](docs/COMPARISON.md) | Nova next to Python/PyTorch, JAX, Mojo, Julia and others |
+| [docs/paper/novaquantum.tex](docs/paper/novaquantum.tex) | The technical report: design, methodology, procedure and results |
 | [docs/GRAMMAR.md](docs/GRAMMAR.md) | The complete grammar of Nova, in EBNF: tokens, layout, statements, expressions |
 | [docs/ERRORS.md](docs/ERRORS.md) | Every error and warning, by code, with how to fix it |
 | [docs/RELEASING.md](docs/RELEASING.md) | Publishing the VS Code extension to the Marketplace and Open VSX |
