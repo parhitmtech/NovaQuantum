@@ -1,0 +1,20 @@
+# RUN: nova-compile %s -o %t.exe
+# RUN: %t.exe | FileCheck %s
+#
+# print, as Python's, compiled to a native binary: several values with a space between them, print() for an empty
+# line, and a tensor, which ends its own line. The CHECK lines are what the interpreter prints
+# (compiler/tests/print_values.nova has the same rules).
+
+ignite:
+    int total = 30
+    double d = 2.5
+    # CHECK: 30 2.500000 1
+    print(total, d, true)
+    # CHECK-EMPTY:
+    print()
+    # CHECK-NEXT: 7
+    print(7)
+    Tensor t = ones(1, 2)
+    # CHECK-NEXT: [1.0000, 1.0000]
+    # CHECK-NEXT: 3
+    print(t, 3)
