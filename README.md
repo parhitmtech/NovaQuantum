@@ -47,7 +47,7 @@ install, on Linux (x64) and Windows (x64).
 | Extension | For | Install |
 |---|---|---|
 | **Nova Quantum Compiler** | Quantum circuits in Nova or OpenQASM 3, compiled for neutral-atom hardware: each circuit's compiled cost above it, the circuit at each stage, Run on the simulator, OpenQASM export | [Marketplace](https://marketplace.visualstudio.com/items?itemName=parhitmathur.nova-quantum) · `code --install-extension parhitmathur.nova-quantum --pre-release` |
-| **Nova Compiler** | The Nova language: errors as you type, quick fixes, hover, completion, Run, the REPL (installed with Nova Quantum Compiler) | [Marketplace](https://marketplace.visualstudio.com/items?itemName=parhitmathur.nova-programming-language) · [Open VSX](https://open-vsx.org/extension/parhitmathur/nova-programming-language) |
+| **Nova Compiler** | The Nova language: errors as you type, quick fixes, hover, completion, Run, a step debugger (F5), the REPL (installed with Nova Quantum Compiler) | [Marketplace](https://marketplace.visualstudio.com/items?itemName=parhitmathur.nova-programming-language) · [Open VSX](https://open-vsx.org/extension/parhitmathur/nova-programming-language) |
 
 **[Getting started](docs/GETTING_STARTED.md)** goes from installing to a first program and
 [a first quantum circuit](docs/GETTING_STARTED.md#7-a-first-quantum-program). To build the compilers from source,
